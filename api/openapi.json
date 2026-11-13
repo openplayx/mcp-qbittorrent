@@ -1,0 +1,1710 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenPlayX BitTorrent API",
+    "version": "1.0.0",
+    "description": "Restricted HTTP API over a pinned qBittorrent engine. Callers use logical destination refs and service task IDs; engine credentials, SIDs, full magnets and absolute paths are never returned.",
+    "license": {
+      "name": "GNU GPL v3 (see COPYING)"
+    }
+  },
+  "security": [
+    {
+      "bearer": []
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Process liveness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Database and engine readiness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ready"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ready"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "This document",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1"
+          }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "summary": "Human-readable API docs",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "HTML"
+          }
+        }
+      }
+    },
+    "/v1/capabilities": {
+      "get": {
+        "summary": "Engine version, inputs, limits, destinations and operations",
+        "responses": {
+          "200": {
+            "description": "Capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/destinations": {
+      "get": {
+        "summary": "Logical destinations with free-space summary",
+        "responses": {
+          "200": {
+            "description": "Destinations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Destinations"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrent-inputs": {
+      "post": {
+        "summary": "Upload a size-limited .torrent; returns a short-lived input_ref",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-bittorrent": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "application/x-bittorrent"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "torrent": {
+                    "type": "string",
+                    "contentMediaType": "application/x-bittorrent"
+                  }
+                },
+                "required": [
+                  "torrent"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Input"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrent-plans": {
+      "post": {
+        "summary": "Validate a magnet or input_ref, destination and strategy; returns an expiring plan. Contacts no peers.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents": {
+      "post": {
+        "summary": "Create a task from a plan (async)",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Operation finished (succeeded or failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Operation pending; poll Location",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "summary": "List this caller's tasks",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "include_removed",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}": {
+      "get": {
+        "summary": "Task download, seeding, error and completeness state",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}/files": {
+      "get": {
+        "summary": "Files once metadata is known",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Files"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}/selection": {
+      "patch": {
+        "summary": "Update file selection against an expected files_revision",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Operation finished (succeeded or failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Operation pending; poll Location",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}/pause": {
+      "post": {
+        "summary": "Request stop; succeeds once the engine reports it stopped",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Operation finished (succeeded or failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Operation pending; poll Location",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}/resume": {
+      "post": {
+        "summary": "Resume (never force-start)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Operation finished (succeeded or failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Operation pending; poll Location",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}/limits": {
+      "patch": {
+        "summary": "Per-task rate limits within administrator ceilings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LimitsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Operation finished (succeeded or failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Operation pending; poll Location",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}/remove-plan": {
+      "post": {
+        "summary": "Preview removal scope and impact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemovePlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Remove plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemovePlan"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}/remove": {
+      "post": {
+        "summary": "Apply a still-valid remove plan (files kept unless the plan said otherwise)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Operation finished (succeeded or failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Operation pending; poll Location",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/operations/{id}": {
+      "get": {
+        "summary": "Async operation result",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/torrents/{id}/files/{file_id}/content": {
+      "get": {
+        "summary": "Read a complete authorised file (Range supported; HEAD also served). Only when capabilities.file_content is true.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^f[0-9]+$"
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File bytes"
+          },
+          "206": {
+            "description": "Partial content"
+          },
+          "416": {
+            "description": "Range not satisfiable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "head": {
+        "summary": "Size and type of a complete file",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service task ID (tsk_…), never an engine hash."
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Headers only"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error with stable code, request ID and retryability",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "request_id",
+              "retryable"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "detail": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "Ready": {
+        "type": "object",
+        "properties": {
+          "ready": {
+            "type": "boolean"
+          },
+          "database": {
+            "type": "boolean"
+          },
+          "engine": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Destination": {
+        "type": "object",
+        "properties": {
+          "destination_ref": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "free_bytes": {
+            "type": "integer"
+          },
+          "max_task_bytes": {
+            "type": "integer"
+          }
+        }
+      },
+      "Destinations": {
+        "type": "object",
+        "properties": {
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Destination"
+            }
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "object"
+          },
+          "engine": {
+            "type": "object"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "magnet",
+                "torrent_file"
+              ]
+            }
+          },
+          "torrent_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selection_presets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "file_content": {
+            "type": "boolean"
+          },
+          "streaming_while_downloading": {
+            "type": "boolean"
+          },
+          "metadata_only_guarantee": {
+            "type": "boolean",
+            "description": "false: a magnet may transfer a little payload data before it is stopped"
+          },
+          "limits": {
+            "type": "object"
+          },
+          "seeding": {
+            "type": "object"
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Destination"
+            }
+          }
+        }
+      },
+      "Input": {
+        "type": "object",
+        "properties": {
+          "input_ref": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "torrent_version": {
+            "type": "string",
+            "enum": [
+              "v1",
+              "v2",
+              "hybrid"
+            ]
+          },
+          "file_count": {
+            "type": "integer"
+          },
+          "total_size": {
+            "type": "integer"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PlanRequest": {
+        "type": "object",
+        "required": [
+          "source",
+          "destination_ref"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "magnet",
+                  "input"
+                ]
+              },
+              "magnet": {
+                "type": "string",
+                "pattern": "^magnet:\\?"
+              },
+              "input_ref": {
+                "type": "string"
+              }
+            }
+          },
+          "destination_ref": {
+            "type": "string"
+          },
+          "selection_preset": {
+            "type": "string",
+            "enum": [
+              "all",
+              "video"
+            ],
+            "default": "all"
+          },
+          "auto_start": {
+            "type": "boolean",
+            "default": true
+          },
+          "download_limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "bytes/s, 0 = administrator ceiling"
+          },
+          "upload_limit": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Plan": {
+        "type": "object",
+        "properties": {
+          "plan_ref": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "input_kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "torrent_version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "string",
+            "enum": [
+              "known",
+              "unknown"
+            ]
+          },
+          "total_size": {
+            "type": "integer"
+          },
+          "selected_size": {
+            "type": "integer"
+          },
+          "file_count": {
+            "type": "integer"
+          },
+          "files_preview": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "selected": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "destination": {
+            "$ref": "#/components/schemas/Destination"
+          },
+          "selection_preset": {
+            "type": "string"
+          },
+          "auto_start": {
+            "type": "boolean"
+          },
+          "download_limit": {
+            "type": "integer"
+          },
+          "upload_limit": {
+            "type": "integer"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateRequest": {
+        "type": "object",
+        "required": [
+          "plan_ref",
+          "expected_revision"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "plan_ref": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Required here or in the Idempotency-Key header"
+          }
+        }
+      },
+      "Operation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "create",
+              "selection",
+              "pause",
+              "resume",
+              "limits",
+              "remove"
+            ]
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "object"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "metadata_pending",
+              "queued",
+              "downloading",
+              "paused",
+              "checking",
+              "stalled",
+              "completed",
+              "seeding",
+              "error",
+              "removed"
+            ]
+          },
+          "hold_reason": {
+            "type": "string",
+            "enum": [
+              "awaiting_selection",
+              "quota_exceeded",
+              "disk_low",
+              "no_files_match_preset"
+            ]
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "input_kind": {
+            "type": "string"
+          },
+          "torrent_version": {
+            "type": "string"
+          },
+          "destination_ref": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "number",
+            "description": "0..1 over selected files"
+          },
+          "selected_size": {
+            "type": "integer"
+          },
+          "total_size": {
+            "type": "integer"
+          },
+          "completed_bytes": {
+            "type": "integer"
+          },
+          "downloaded_bytes": {
+            "type": "integer"
+          },
+          "uploaded_bytes": {
+            "type": "integer"
+          },
+          "download_speed": {
+            "type": "integer"
+          },
+          "upload_speed": {
+            "type": "integer"
+          },
+          "download_limit": {
+            "type": "integer"
+          },
+          "upload_limit": {
+            "type": "integer"
+          },
+          "seeds": {
+            "type": "integer"
+          },
+          "peers": {
+            "type": "integer"
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "eta_seconds": {
+            "type": "integer"
+          },
+          "metadata_known": {
+            "type": "boolean"
+          },
+          "payload_complete": {
+            "type": "boolean"
+          },
+          "selected_files_complete": {
+            "type": "boolean"
+          },
+          "seeding": {
+            "type": "boolean"
+          },
+          "files_revision": {
+            "type": "integer"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "true when engine state could not be observed recently"
+          },
+          "engine_status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable"
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "removed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data_deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TaskList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "File": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative to the task, never an absolute server path"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "progress": {
+            "type": "number"
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "is_video": {
+            "type": "boolean"
+          },
+          "content_available": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Files": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "metadata_known": {
+            "type": "boolean"
+          },
+          "files_revision": {
+            "type": "integer"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/File"
+            }
+          }
+        }
+      },
+      "SelectionRequest": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "type": "integer"
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "all",
+              "video"
+            ]
+          },
+          "file_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20000
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "description": "Exactly one of preset or file_ids."
+      },
+      "ControlRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "type": "string"
+          }
+        }
+      },
+      "LimitsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "download_limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "upload_limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        }
+      },
+      "RemovePlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "delete_files": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "RemovePlan": {
+        "type": "object",
+        "properties": {
+          "plan_ref": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "task_name": {
+            "type": "string"
+          },
+          "delete_files": {
+            "type": "boolean"
+          },
+          "files_on_disk": {
+            "type": "integer"
+          },
+          "bytes_on_disk": {
+            "type": "integer"
+          },
+          "shared_with_tasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stops_seeding": {
+            "type": "boolean"
+          },
+          "effects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "task_revision": {
+            "type": "integer"
+          },
+          "confirmation_digest": {
+            "type": "string"
+          }
+        }
+      },
+      "RemoveRequest": {
+        "type": "object",
+        "required": [
+          "plan_ref"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "plan_ref": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

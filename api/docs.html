@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenPlayX BitTorrent API</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 980px; padding: 24px; color: #1d1d1f; }
+  h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 32px; border-bottom: 1px solid #ddd; }
+  .op { border: 1px solid #e3e3e6; border-radius: 8px; margin: 10px 0; padding: 10px 14px; }
+  .m { display: inline-block; min-width: 56px; font: 600 12px ui-monospace, monospace; padding: 2px 6px; border-radius: 4px; color: #fff; text-align: center; }
+  .get { background: #2f6fde; } .post { background: #1f8a4c; } .patch { background: #b8740b; } .head { background: #6b6b75; }
+  code, pre { font: 13px ui-monospace, monospace; } pre { background: #f6f6f8; padding: 10px; overflow: auto; border-radius: 6px; }
+  details summary { cursor: pointer; color: #555; }
+  @media (prefers-color-scheme: dark) { body { background: #151517; color: #e8e8ea; } .op { border-color: #333; } pre { background: #222226; } }
+</style>
+</head>
+<body>
+<h1 id="title">OpenPlayX BitTorrent API</h1>
+<p id="desc"></p>
+<p>Machine-readable spec: <a href="/openapi.json">/openapi.json</a>. Authenticate with <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+<div id="paths"></div>
+<h2>Schemas</h2>
+<div id="schemas"></div>
+<script>
+fetch('/openapi.json').then(r => r.json()).then(doc => {
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  document.getElementById('title').textContent = doc.info.title + ' ' + doc.info.version;
+  document.getElementById('desc').textContent = doc.info.description;
+  const paths = document.getElementById('paths');
+  for (const [p, ops] of Object.entries(doc.paths)) {
+    for (const [m, op] of Object.entries(ops)) {
+      const box = el('div', 'op');
+      const head = el('div');
+      head.append(el('span', 'm ' + m, m.toUpperCase()), ' ', el('code', null, p), ' — ', op.summary || '');
+      box.append(head);
+      const det = el('details');
+      det.append(el('summary', null, 'details'));
+      const info = { parameters: op.parameters, requestBody: op.requestBody, responses: op.responses, security: op.security };
+      det.append(el('pre', null, JSON.stringify(info, null, 2)));
+      box.append(det);
+      paths.append(box);
+    }
+  }
+  const schemas = document.getElementById('schemas');
+  for (const [n, s] of Object.entries(doc.components.schemas)) {
+    const det = el('details', 'op');
+    det.append(el('summary', null, n));
+    det.append(el('pre', null, JSON.stringify(s, null, 2)));
+    schemas.append(det);
+  }
+});
+</script>
+</body>
+</html>

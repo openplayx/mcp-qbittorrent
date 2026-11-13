@@ -1,0 +1,64 @@
+# Isolated end-to-end stack. The engine under test sits only on the
+# internal "p2p" network (no route to the internet, DHT/PeX/LSD off) and
+# reaches peers solely through the seeder's embedded tracker.
+name: ${COMPOSE_PROJECT_NAME:?}
+
+x-engine: &engine
+  image: openplayx/bittorrent-engine:5.1.0-r0
+  user: "${PUID:?}:${PGID:?}"
+  networks: [p2p]
+
+services:
+  seeder:
+    <<: *engine
+    environment:
+      QBT_USERNAME: seed
+      QBT_PASSWORD_PBKDF2: ${SEEDER_PBKDF2:?}
+      QBT_WEBUI_PORT: ${SEEDER_PORT:?}
+      QBT_PEER_PORT: "6881"
+      QBT_SERVER_DOMAINS: "seeder;localhost;127.0.0.1"
+      QBT_DHT: "false"
+      QBT_PEX: "false"
+      QBT_LSD: "false"
+    volumes:
+      - ${WORK:?}/seed:/seed
+      - ${WORK}/seeder-config:/config
+
+  # Exposes only the seeder WebUI to the test runner (same port number, so
+  # the engine's Host-header port check stays enabled).
+  seeder-proxy:
+    image: alpine/socat:1.8.0.3
+    command: ["tcp-listen:${SEEDER_PORT},fork,reuseaddr", "tcp-connect:seeder:${SEEDER_PORT}"]
+    ports: ["127.0.0.1:${SEEDER_PORT}:${SEEDER_PORT}"]
+    networks: [p2p, edge]
+
+  qbittorrent:
+    <<: *engine
+    environment:
+      QBT_USERNAME: engine
+      QBT_PASSWORD_PBKDF2: ${ENGINE_PBKDF2:?}
+      QBT_WEBUI_PORT: "8080"
+      QBT_PEER_PORT: "6881"
+      QBT_SERVER_DOMAINS: "qbittorrent;localhost;127.0.0.1"
+      QBT_DHT: "false"
+      QBT_PEX: "false"
+      QBT_LSD: "false"
+    volumes:
+      - ${WORK}/downloads:/downloads
+      - ${WORK}/engine-config:/config
+
+  api:
+    image: openplayx/bittorrent-server:e2e
+    user: "${PUID}:${PGID}"
+    depends_on: [qbittorrent]
+    volumes:
+      - ${WORK}/api-config:/etc/bittorrent-server:ro
+      - ${WORK}/api-data:/data
+      - ${WORK}/downloads:/downloads
+    ports: ["127.0.0.1:${API_PORT:?}:8780"]
+    networks: [p2p, edge]
+
+networks:
+  p2p:
+    internal: true
+  edge: {}

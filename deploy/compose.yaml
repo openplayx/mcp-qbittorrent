@@ -1,0 +1,60 @@
+# OpenPlayX BitTorrent service: API + pinned qbittorrent-nox.
+# Run with an explicit project name so it never collides with other stacks:
+#   docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env up -d
+# Both services mount the download root at the same path (/downloads).
+name: ${COMPOSE_PROJECT_NAME:?set COMPOSE_PROJECT_NAME}
+
+services:
+  api:
+    image: openplayx/bittorrent-server:${API_TAG:?set API_TAG}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    depends_on: [qbittorrent]
+    volumes:
+      - ./config:/etc/bittorrent-server:ro
+      - ./state/api:/data
+      - ${DOWNLOAD_ROOT:?set DOWNLOAD_ROOT}:/downloads
+    ports:
+      # Authenticated API entry. Bind to a LAN/VPN address or 127.0.0.1
+      # behind a TLS reverse proxy; never 0.0.0.0 without TLS.
+      - "${API_BIND:-127.0.0.1}:${API_PORT:?set API_PORT}:8780"
+    networks: [engine, edge]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8780/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  qbittorrent:
+    image: openplayx/bittorrent-engine:${ENGINE_TAG:-5.1.0-r0}
+    build:
+      context: ./engine
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    environment:
+      QBT_USERNAME: ${QBT_USERNAME:?set QBT_USERNAME}
+      QBT_PASSWORD_PBKDF2: ${QBT_PASSWORD_PBKDF2:?set QBT_PASSWORD_PBKDF2}
+      QBT_WEBUI_PORT: ${QBT_WEBUI_PORT:?set QBT_WEBUI_PORT (must match engine.url port in config.json)}
+      QBT_PEER_PORT: ${PEER_PORT:?set PEER_PORT}
+      QBT_SERVER_DOMAINS: "qbittorrent;localhost;127.0.0.1"
+      QBT_DHT: ${QBT_DHT:-true}
+      QBT_PEX: ${QBT_PEX:-true}
+      QBT_LSD: ${QBT_LSD:-false}
+    volumes:
+      - ./state/qbittorrent:/config
+      - ${DOWNLOAD_ROOT}:/downloads
+    ports:
+      # BitTorrent peer port (TCP+UDP).
+      - "${PEER_PORT}:${PEER_PORT}/tcp"
+      - "${PEER_PORT}:${PEER_PORT}/udp"
+      # Native WebUI for maintainers only, via SSH forwarding to the same
+      # port number (the engine validates the Host header port).
+      - "127.0.0.1:${QBT_WEBUI_PORT}:${QBT_WEBUI_PORT}"
+    networks: [engine]
+
+networks:
+  engine: {}
+  edge: {}

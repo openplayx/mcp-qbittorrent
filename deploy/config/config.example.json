@@ -1,0 +1,33 @@
+{
+  "listen": "0.0.0.0:8780",
+  "data_dir": "/data",
+  "secrets_file": "/etc/bittorrent-server/secrets.json",
+  "public_name": "OpenPlayX BitTorrent",
+  "engine": {
+    "url": "http://qbittorrent:18781",
+    "supported_versions": ["v5.1.0"],
+    "min_webapi_version": "2.11.0",
+    "timeout_seconds": 10
+  },
+  "download_root": "/downloads",
+  "destinations": [
+    {"ref": "default", "name": "Downloads", "sub_path": "default"}
+  ],
+  "limits": {
+    "max_active_tasks": 20,
+    "max_task_bytes": 68719476736,
+    "min_free_bytes": 5368709120,
+    "max_torrent_file_bytes": 4194304,
+    "max_magnet_length": 4096,
+    "max_download_rate": 0,
+    "max_upload_rate": 2097152,
+    "plan_ttl_seconds": 1800,
+    "input_ttl_seconds": 3600,
+    "requests_per_minute": 240
+  },
+  "seeding": {"ratio_limit": 1.0, "seeding_time_minutes": 1440},
+  "network": {"allow_private_networks": false, "tracker_schemes": ["http", "https", "udp"]},
+  "files": {"content_access": true},
+  "reconcile_interval_seconds": 5,
+  "retention_days": 30
+}
