@@ -5,7 +5,7 @@ OpenPlayX App calls it through host-registered AI tools to add magnet /
 `.torrent` downloads, follow progress, select files, pause, resume, limit and
 remove tasks. Downloads run on the server and keep going when the App closes.
 
-Design: `design/tech/bittorrent_server.md` in the OpenPlayX design repository.
+Design: `design/services/bittorrent_server.md` in the OpenPlayX design repository.
 
 ## What it is (and is not)
 
