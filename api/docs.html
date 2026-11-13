@@ -18,12 +18,12 @@
 <body>
 <h1 id="title">OpenPlayX BitTorrent API</h1>
 <p id="desc"></p>
-<p>Machine-readable spec: <a href="/openapi.json">/openapi.json</a>. Authenticate with <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+<p>Machine-readable spec: <a href="/api/openapi.json">/api/openapi.json</a>. Authenticate with <code>Authorization: Bearer &lt;token&gt;</code>.</p>
 <div id="paths"></div>
 <h2>Schemas</h2>
 <div id="schemas"></div>
 <script>
-fetch('/openapi.json').then(r => r.json()).then(doc => {
+fetch('/api/openapi.json').then(r => r.json()).then(doc => {
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   document.getElementById('title').textContent = doc.info.title + ' ' + doc.info.version;
   document.getElementById('desc').textContent = doc.info.description;

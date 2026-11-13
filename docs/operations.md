@@ -29,7 +29,11 @@
 |---|---|---|
 | `API_PORT` → 8780 | `API_BIND` (LAN/VPN IP, or 127.0.0.1 behind a TLS proxy) | authenticated API |
 | `PEER_PORT` tcp+udp | public | BitTorrent peers |
-| `QBT_WEBUI_PORT` | 127.0.0.1 only | native WebUI for maintainers via `ssh -L P:127.0.0.1:P` |
+| `QBT_WEBUI_PORT` | 127.0.0.1 only | engine WebUI directly, for maintainers via `ssh -L P:127.0.0.1:P` |
+
+With `webui.enabled`, users reach the WebUI at the API port's root
+(`http://host:API_PORT/`) through the guarded proxy; they log in with the
+engine WebUI account. See README "WebUI" for what the proxy refuses.
 
 Serve the API over HTTPS for anything beyond a private LAN: set
 `tls_cert_file`/`tls_key_file` in config.json or put a TLS reverse proxy in
@@ -40,8 +44,12 @@ front. The App refuses plain HTTP to public addresses.
 `deploy/engine/entrypoint.sh` renders `qBittorrent.conf` on every start:
 WebUI authentication, CSRF protection, clickjacking protection and Host header
 validation stay on; external programs (AutoRun), UPnP and port forwarding are
-off. The adapter sends a matching `Origin`/`Referer`; nothing is disabled for
-convenience. Changing preferences in the WebUI does not survive a restart.
+off. The adapter and the WebUI proxy send a matching `Origin`/`Referer`;
+nothing is disabled for convenience, except the engine's login ban
+(`MaxAuthenticationFailCount=0`): behind the proxy all browsers share one
+address, so the proxy limits failures per real client IP instead.
+Preference changes are refused through the proxy and would not survive a
+restart anyway.
 
 ## Health, logs, rollback
 
@@ -59,12 +67,12 @@ query strings, bodies, magnets, tokens or paths.
 - Disk watermark: when free space drops below `limits.min_free_bytes`, running
   downloads are stopped (`hold_reason: disk_low`) and resume automatically
   once space is back above the mark plus 10%.
-- Engine restarts or outages: tasks are kept; views show `stale: true`.
-  Torrents removed directly in the WebUI become `error / engine_task_missing`
-  and are never re-added automatically.
+- The service stores no state. Engine restarts or outages: reads answer
+  `503 engine_unavailable` until the engine is back; nothing is lost because
+  the engine is the only store. Plans issued before an API restart expire.
 - Seeding uses upload bandwidth; `seeding.ratio_limit` and
   `seeding.seeding_time_minutes` bound it per torrent.
-- Engine torrents not created by this service are never listed or modified.
+- Every engine torrent (also WebUI-added) is listed and controllable.
 - Cleanup: removing a task keeps its files by default; deleting files requires
   a remove plan with `delete_files: true` and removes only that task's own
   directory.

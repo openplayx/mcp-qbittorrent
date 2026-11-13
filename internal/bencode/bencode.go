@@ -146,8 +146,12 @@ func (d *decoder) str() ([]byte, error) {
 	return d.data[begin : begin+n], nil
 }
 
-// Encode serialises simple Go values (used only for test fixtures):
-// int/int64, string, []byte, []any, map[string]any.
+// Raw is already-encoded bencode written verbatim (e.g. an info dict whose
+// exact bytes define the info hash).
+type Raw []byte
+
+// Encode serialises simple Go values: int/int64, string, []byte, Raw,
+// []any, map[string]any.
 func Encode(v any) []byte {
 	var b bytes.Buffer
 	encode(&b, v)
@@ -162,6 +166,8 @@ func encode(b *bytes.Buffer, v any) {
 		b.WriteString("i" + strconv.FormatInt(x, 10) + "e")
 	case string:
 		b.WriteString(strconv.Itoa(len(x)) + ":" + x)
+	case Raw:
+		b.Write(x)
 	case []byte:
 		b.WriteString(strconv.Itoa(len(x)) + ":")
 		b.Write(x)

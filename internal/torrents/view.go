@@ -1,8 +1,11 @@
 package torrents
 
 import (
+	"context"
 	"strconv"
 	"time"
+
+	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
 )
 
 // Public download states.
@@ -16,7 +19,6 @@ const (
 	StateCompleted       = "completed"
 	StateSeeding         = "seeding"
 	StateError           = "error"
-	StateRemoved         = "removed"
 )
 
 func mapEngineState(engine string, hasMetadata bool) string {
@@ -55,17 +57,17 @@ func isStopped(engine string) bool {
 	return false
 }
 
-// TaskView is the API representation. It never contains engine hashes as
-// identifiers, SIDs, full magnets or absolute paths.
+// TaskView is the live projection of one engine torrent. The ID is the
+// engine's 40-hex hash. No absolute paths, credentials or magnets.
 type TaskView struct {
 	ID              string     `json:"id"`
 	Name            string     `json:"name"`
 	State           string     `json:"state"`
 	HoldReason      string     `json:"hold_reason,omitempty"`
 	ErrorCode       string     `json:"error_code,omitempty"`
-	InputKind       string     `json:"input_kind"`
 	TorrentVersion  string     `json:"torrent_version"`
-	Destination     string     `json:"destination_ref"`
+	Destination     string     `json:"destination_ref,omitempty"`
+	AddedVia        string     `json:"added_via"` // "app" (this API) or "other" (WebUI, …)
 	Progress        float64    `json:"progress"`
 	SelectedSize    int64      `json:"selected_size"`
 	TotalSize       int64      `json:"total_size"`
@@ -84,103 +86,102 @@ type TaskView struct {
 	PayloadComplete bool       `json:"payload_complete"`
 	SelectedDone    bool       `json:"selected_files_complete"`
 	Seeding         bool       `json:"seeding"`
-	FilesRevision   int        `json:"files_revision"`
-	Revision        int        `json:"revision"`
-	Stale           bool       `json:"stale"`
-	EngineStatus    string     `json:"engine_status"`
-	ObservedAt      *time.Time `json:"observed_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	RemovedAt       *time.Time `json:"removed_at,omitempty"`
-	DataDeleted     bool       `json:"data_deleted,omitempty"`
+	AddedAt         *time.Time `json:"added_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
-func (s *Service) staleAfter() time.Duration {
-	return time.Duration(s.cfg.ReconcileIntervalSeconds) * 3 * time.Second
+func unix(v int64) *time.Time {
+	if v <= 0 {
+		return nil
+	}
+	t := time.Unix(v, 0).UTC()
+	return &t
 }
 
-func (s *Service) view(r *taskRec) TaskView {
-	b := r.body
-	v := TaskView{
-		ID: r.row.ID, Name: b.Name, HoldReason: b.HoldReason, ErrorCode: b.Error,
-		InputKind: b.InputKind, TorrentVersion: b.Version, Destination: b.Destination,
-		DownloadLimit: b.DownloadLimit, UploadLimit: b.UploadLimit,
-		FilesRevision: b.FilesRevision, Revision: b.Revision,
-		CreatedAt: time.Unix(r.row.CreatedAt, 0).UTC(), UpdatedAt: time.Unix(r.row.UpdatedAt, 0).UTC(),
-		EngineStatus: "available", DataDeleted: b.DataDeleted,
-	}
-	if !s.healthy.Load() {
-		v.EngineStatus = "unavailable"
-	}
-	switch r.row.Phase {
-	case "removed":
-		v.State = StateRemoved
-		t := time.Unix(b.RemovedAt, 0).UTC()
-		v.RemovedAt = &t
-		return v
-	case "failed":
-		v.State = StateError
-		return v
-	default:
-		// Until the first observation: magnets wait for metadata, files queue.
-		v.State = StateQueued
-		if b.InputKind == "magnet" {
-			v.State = StateMetadataPending
-		}
-	}
-	if snap := r.snap; snap != nil {
-		obs := time.Unix(r.row.ObservedAt, 0).UTC()
-		v.ObservedAt = &obs
-		v.Stale = !s.healthy.Load() || time.Since(obs) > s.staleAfter()
-		if snap.Missing {
-			v.State, v.ErrorCode = StateError, "engine_task_missing"
-		} else if r.row.Phase == "active" {
-			v.State = mapEngineState(snap.EngineState, snap.HasMetadata)
-		}
-		v.MetadataKnown = snap.HasMetadata
-		v.Progress = snap.Progress
-		v.SelectedSize, v.TotalSize, v.CompletedBytes = snap.Size, snap.TotalSize, snap.Completed
-		v.Downloaded, v.Uploaded = snap.Downloaded, snap.Uploaded
-		v.DownloadSpeed, v.UploadSpeed = snap.DlSpeed, snap.UpSpeed
-		v.Seeds, v.Peers, v.Ratio = snap.Seeds, snap.Peers, snap.Ratio
-		if snap.ETA > 0 && snap.ETA < 8640000 {
-			eta := snap.ETA
-			v.ETASeconds = &eta
-		}
-		v.Seeding = v.State == StateSeeding
-		v.PayloadComplete, v.SelectedDone = completion(snap)
-		if v.Stale {
-			// A cached "downloading" is not a live fact.
-			v.DownloadSpeed, v.UploadSpeed, v.ETASeconds = 0, 0, nil
-		}
-	} else if r.row.Phase == "active" {
-		v.Stale = true
+func nonNegative(v int64) int64 {
+	if v < 0 {
+		return 0
 	}
 	return v
 }
 
-func completion(snap *Snapshot) (payload, selected bool) {
-	if !snap.HasMetadata || len(snap.Files) == 0 {
-		return false, false
+func holdReason(tags map[string]bool) string {
+	switch {
+	case tags[TagHoldQuota]:
+		return "quota_exceeded"
+	case tags[TagHoldDisk]:
+		return "disk_low"
+	case tags[TagHoldNoMatch]:
+		return "no_files_match_preset"
+	case tags[TagHoldStart]:
+		return "awaiting_start"
 	}
-	payload, selected = true, false
-	any := false
-	allSel := true
-	for _, f := range snap.Files {
-		if f.Progress < 1 {
-			payload = false
-		}
-		if f.Priority > 0 {
-			any = true
-			if f.Progress < 1 {
-				allSel = false
-			}
-		}
-	}
-	return payload, any && allSel
+	return ""
 }
 
-// FileView is one file of a task, referenced by a task-scoped file_id.
+func (s *Service) view(t qbittorrent.Torrent) TaskView {
+	tags := tagSet(t)
+	state := mapEngineState(t.State, t.HasMetadata)
+	v := TaskView{
+		ID: t.Hash, Name: safeDisplayName(t.Name), State: state, HoldReason: holdReason(tags),
+		AddedVia: "other", Progress: t.Progress, SelectedSize: nonNegative(t.Size),
+		TotalSize: nonNegative(t.TotalSize), CompletedBytes: nonNegative(t.Completed),
+		Downloaded: t.Downloaded, Uploaded: t.Uploaded, DownloadSpeed: t.DlSpeed, UploadSpeed: t.UpSpeed,
+		DownloadLimit: nonNegative(t.DlLimit), UploadLimit: nonNegative(t.UpLimit),
+		Seeds: t.NumSeeds, Peers: t.NumLeechs, Ratio: t.Ratio, MetadataKnown: t.HasMetadata,
+		Seeding: state == StateSeeding, AddedAt: unix(t.AddedOn), CompletedAt: unix(t.CompletionOn),
+	}
+	if tags[TagService] {
+		v.AddedVia = "app"
+	}
+	switch {
+	case t.InfohashV1 != "" && t.InfohashV2 != "":
+		v.TorrentVersion = "hybrid"
+	case t.InfohashV2 != "":
+		v.TorrentVersion = "v2"
+	default:
+		v.TorrentVersion = "v1"
+	}
+	if d, ok := s.destinationOf(t.SavePath); ok {
+		v.Destination = d.Ref
+	}
+	switch t.State {
+	case "error":
+		v.ErrorCode = "engine_error"
+	case "missingFiles":
+		v.ErrorCode = "files_missing"
+	}
+	if t.ETA > 0 && t.ETA < 8640000 {
+		eta := t.ETA
+		v.ETASeconds = &eta
+	}
+	v.SelectedDone = t.HasMetadata && t.Size > 0 && t.Progress >= 1
+	return v
+}
+
+// viewLive adds payload completeness, which needs the file list: total_size
+// counts v2/hybrid padding, so "selected size == total size" is not a valid
+// test. Only torrents whose selection is complete need the extra read.
+func (s *Service) viewLive(ctx context.Context, t qbittorrent.Torrent) TaskView {
+	v := s.view(t)
+	if !v.SelectedDone {
+		return v
+	}
+	fs, err := s.engine.Files(ctx, t.Hash)
+	if err != nil || len(fs) == 0 {
+		return v
+	}
+	v.PayloadComplete = true
+	for _, f := range fs {
+		if f.Progress < 1 {
+			v.PayloadComplete = false
+			break
+		}
+	}
+	return v
+}
+
+// FileView is one file of a torrent, referenced by its engine index.
 type FileView struct {
 	ID        string  `json:"file_id"`
 	Path      string  `json:"path"`
@@ -190,6 +191,27 @@ type FileView struct {
 	Complete  bool    `json:"complete"`
 	IsVideo   bool    `json:"is_video"`
 	Available bool    `json:"content_available"`
+}
+
+type FilesView struct {
+	TaskID        string     `json:"task_id"`
+	MetadataKnown bool       `json:"metadata_known"`
+	FilesRevision string     `json:"files_revision"`
+	Files         []FileView `json:"files"`
+}
+
+// filesRevision fingerprints the current selection so a selection change
+// can be rejected if someone (App, WebUI) changed it meanwhile.
+func filesRevision(fs []qbittorrent.File) string {
+	b := make([]byte, 0, len(fs))
+	for _, f := range fs {
+		if f.Priority > 0 {
+			b = append(b, '1')
+		} else {
+			b = append(b, '0')
+		}
+	}
+	return digest(string(b))[:12]
 }
 
 func fileID(index int) string { return "f" + strconv.Itoa(index) }

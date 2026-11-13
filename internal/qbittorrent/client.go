@@ -309,6 +309,7 @@ type Torrent struct {
 	Tags         string  `json:"tags"`
 	HasMetadata  bool    `json:"has_metadata"`
 	CompletionOn int64   `json:"completion_on"`
+	AddedOn      int64   `json:"added_on"`
 }
 
 func (c *Client) Info(ctx context.Context, tag string) ([]Torrent, error) {
@@ -316,6 +317,21 @@ func (c *Client) Info(ctx context.Context, tag string) ([]Torrent, error) {
 	if tag != "" {
 		form.Set("tag", tag)
 	}
+	return c.info(ctx, form)
+}
+
+// InfoHash returns the torrent with this engine hash (empty if absent).
+func (c *Client) InfoHash(ctx context.Context, hash string) ([]Torrent, error) {
+	return c.info(ctx, url.Values{"hashes": {hash}})
+}
+
+// Ping is a cheap liveness/auth probe for readiness checks.
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.do(ctx, call{method: http.MethodGet, path: "app/version"})
+	return err
+}
+
+func (c *Client) info(ctx context.Context, form url.Values) ([]Torrent, error) {
 	data, err := c.do(ctx, call{method: http.MethodGet, path: "torrents/info", form: form})
 	if err != nil {
 		return nil, err
@@ -380,10 +396,18 @@ func (c *Client) Start(ctx context.Context, hash string) error {
 	return c.hashesCall(ctx, "torrents/start", hash, nil)
 }
 
-// Delete removes a torrent; deleteFiles is always false from this service,
-// payload removal is done by the service after its own boundary checks.
-func (c *Client) Delete(ctx context.Context, hash string) error {
-	return c.hashesCall(ctx, "torrents/delete", hash, url.Values{"deleteFiles": {"false"}})
+// Delete removes a torrent; with deleteFiles the engine removes exactly
+// that torrent's own files.
+func (c *Client) Delete(ctx context.Context, hash string, deleteFiles bool) error {
+	return c.hashesCall(ctx, "torrents/delete", hash, url.Values{"deleteFiles": {strconv.FormatBool(deleteFiles)}})
+}
+
+func (c *Client) AddTags(ctx context.Context, hash string, tags ...string) error {
+	return c.hashesCall(ctx, "torrents/addTags", hash, url.Values{"tags": {strings.Join(tags, ",")}})
+}
+
+func (c *Client) RemoveTags(ctx context.Context, hash string, tags ...string) error {
+	return c.hashesCall(ctx, "torrents/removeTags", hash, url.Values{"tags": {strings.Join(tags, ",")}})
 }
 
 func (c *Client) SetLimits(ctx context.Context, hash string, download, upload int64) error {

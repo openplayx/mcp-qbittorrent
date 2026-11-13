@@ -28,7 +28,6 @@ import (
 	"github.com/openplayx/bittorrent-server/internal/config"
 	"github.com/openplayx/bittorrent-server/internal/files"
 	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
-	"github.com/openplayx/bittorrent-server/internal/storage"
 	"github.com/openplayx/bittorrent-server/internal/torrents"
 )
 
@@ -66,18 +65,12 @@ func serve(configPath string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	store, err := storage.Open(cfg.DataDir)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
 	engine, err := qbittorrent.New(cfg.Engine.URL, secrets.Engine.Username, secrets.Engine.Password,
 		time.Duration(cfg.Engine.TimeoutSeconds)*time.Second)
 	if err != nil {
 		return err
 	}
-	svc := torrents.New(&cfg, store, engine, log, files.FreeBytes)
-	defer svc.Close()
+	svc := torrents.New(&cfg, engine, log, files.FreeBytes)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -105,9 +98,6 @@ func serve(configPath string, log *slog.Logger) error {
 				return
 			case <-time.After(5 * time.Second):
 			}
-		}
-		if err := svc.Recover(ctx); err != nil {
-			log.Error("recover", "err", err)
 		}
 		svc.Run(ctx)
 	}()

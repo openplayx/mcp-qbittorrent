@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	mrand "math/rand/v2"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -129,22 +130,37 @@ func waitFor(t *testing.T, what string, d time.Duration, cond func() (bool, stri
 	t.Fatalf("timeout waiting for %s; last: %s", what, last)
 }
 
-func waitOp(t *testing.T, r res) res {
+// taskDirs maps task id → its download directory (the API creates one
+// opx-* directory per added torrent; ids are engine hashes).
+var taskDirs = map[string]string{}
+
+func opxDirs() map[string]bool {
+	out := map[string]bool{}
+	entries, _ := os.ReadDir(filepath.Join(work, "downloads", "e2e"))
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "opx-") {
+			out[e.Name()] = true
+		}
+	}
+	return out
+}
+
+// createFromPlan adds a planned torrent and records its directory.
+func createFromPlan(t *testing.T, planRef string) res {
 	t.Helper()
-	if r.status != 200 && r.status != 202 {
-		t.Fatalf("operation: %d %s", r.status, r.raw)
-	}
-	for r.s("status") == "pending" {
-		time.Sleep(300 * time.Millisecond)
-		r = must(t, call(t, "GET", "/v1/operations/"+r.s("id"), nil), 200)
-	}
-	if r.s("status") != "succeeded" {
-		t.Fatalf("operation failed: %s", r.raw)
+	before := opxDirs()
+	r := must(t, call(t, "POST", "/api/v1/torrents", map[string]any{"plan_ref": planRef}), 201)
+	for d := range opxDirs() {
+		if !before[d] {
+			taskDirs[r.s("id")] = filepath.Join(work, "downloads", "e2e", d)
+		}
 	}
 	return r
 }
 
-func task(t *testing.T, id string) res { return must(t, call(t, "GET", "/v1/torrents/"+id, nil), 200) }
+func task(t *testing.T, id string) res {
+	return must(t, call(t, "GET", "/api/v1/torrents/"+id, nil), 200)
+}
 
 func waitState(t *testing.T, id string, d time.Duration, cond func(r res) bool) res {
 	t.Helper()
@@ -157,7 +173,7 @@ func waitState(t *testing.T, id string, d time.Duration, cond func(r res) bool) 
 }
 
 func complete(r res) bool {
-	return r.body["selected_files_complete"] == true && r.body["stale"] == false
+	return r.body["selected_files_complete"] == true
 }
 
 // ---------- seeder (fixture engine) client ----------
@@ -268,7 +284,7 @@ func writeFixture(t *testing.T, rel string, size int, seed uint64) {
 
 func downloadedSHA(t *testing.T, taskID, rel string) string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(work, "downloads", "e2e", taskID, rel))
+	data, err := os.ReadFile(filepath.Join(taskDirs[taskID], rel))
 	if err != nil {
 		t.Fatalf("read downloaded %s: %v", rel, err)
 	}
@@ -296,14 +312,13 @@ func verifyFiles(t *testing.T, taskID, srcDir string, rels ...string) {
 
 func createTask(t *testing.T, torrent []byte, preset string, autoStart bool, key string) (string, res) {
 	t.Helper()
-	in := must(t, call(t, "POST", "/v1/torrent-inputs", torrent), 201)
-	plan := must(t, call(t, "POST", "/v1/torrent-plans", map[string]any{
+	in := must(t, call(t, "POST", "/api/v1/torrent-inputs", torrent), 201)
+	plan := must(t, call(t, "POST", "/api/v1/torrent-plans", map[string]any{
 		"source": map[string]any{"type": "input", "input_ref": in.s("input_ref")}, "destination_ref": "default",
 		"selection_preset": preset, "auto_start": autoStart,
 	}), 201)
-	body := map[string]any{"plan_ref": plan.s("plan_ref"), "expected_revision": 1, "idempotency_key": key}
-	op := waitOp(t, call(t, "POST", "/v1/torrents", body))
-	return op.s("task_id"), op
+	r := createFromPlan(t, plan.s("plan_ref"))
+	return r.s("id"), r
 }
 
 func dc(t *testing.T, args ...string) {
@@ -317,7 +332,7 @@ func dc(t *testing.T, args ...string) {
 
 func waitReady(t *testing.T) {
 	waitFor(t, "api ready", 90*time.Second, func() (bool, string) {
-		resp, err := http.Get(apiURL + "/readyz")
+		resp, err := http.Get(apiURL + "/api/readyz")
 		if err != nil {
 			return false, err.Error()
 		}
@@ -349,17 +364,17 @@ func TestEndToEnd(t *testing.T) {
 	waitReady(t)
 
 	pass(t, "health_auth_docs", func(t *testing.T) {
-		for _, p := range []string{"/healthz", "/readyz", "/openapi.json", "/docs"} {
+		for _, p := range []string{"/api/healthz", "/api/readyz", "/api/openapi.json", "/api/docs"} {
 			resp, err := http.Get(apiURL + p)
 			if err != nil || resp.StatusCode != 200 {
 				t.Fatalf("%s: %v %v", p, err, resp)
 			}
 			resp.Body.Close()
 		}
-		if r := call(t, "GET", "/v1/capabilities", nil, "Authorization", "Bearer wrong"); r.status != 401 {
+		if r := call(t, "GET", "/api/v1/capabilities", nil, "Authorization", "Bearer wrong"); r.status != 401 {
 			t.Fatalf("bad token accepted: %d", r.status)
 		}
-		caps := must(t, call(t, "GET", "/v1/capabilities", nil), 200)
+		caps := must(t, call(t, "GET", "/api/v1/capabilities", nil), 200)
 		rep.Engine = caps.body["engine"].(map[string]any)
 		if rep.Engine["version"] != "v5.1.0" || rep.Engine["available"] != true {
 			t.Fatalf("engine: %s", caps.raw)
@@ -405,12 +420,12 @@ func TestEndToEnd(t *testing.T) {
 
 	pass(t, "idempotent_create", func(t *testing.T) {
 		// Re-plan is refused as duplicate; the original key replays the operation.
-		in := must(t, call(t, "POST", "/v1/torrent-inputs", single), 201)
-		r := call(t, "POST", "/v1/torrent-plans", map[string]any{"source": map[string]any{"type": "input", "input_ref": in.s("input_ref")}, "destination_ref": "default"})
+		in := must(t, call(t, "POST", "/api/v1/torrent-inputs", single), 201)
+		r := call(t, "POST", "/api/v1/torrent-plans", map[string]any{"source": map[string]any{"type": "input", "input_ref": in.s("input_ref")}, "destination_ref": "default"})
 		if r.code() != "duplicate_task" {
 			t.Fatalf("duplicate plan: %s", r.raw)
 		}
-		list := must(t, call(t, "GET", "/v1/torrents", nil), 200)
+		list := must(t, call(t, "GET", "/api/v1/torrents", nil), 200)
 		if n := len(list.body["items"].([]any)); n != 1 {
 			t.Fatalf("tasks: %d", n)
 		}
@@ -434,9 +449,9 @@ func TestEndToEnd(t *testing.T) {
 	pass(t, "file_selection", func(t *testing.T) {
 		id, _ := createTask(t, selective, "all", false, "selective")
 		r := waitState(t, id, 60*time.Second, func(r res) bool {
-			return r.s("hold_reason") == "awaiting_selection" && r.body["metadata_known"] == true
+			return r.s("hold_reason") == "awaiting_start" && r.body["metadata_known"] == true
 		})
-		files := must(t, call(t, "GET", "/v1/torrents/"+id+"/files", nil), 200)
+		files := must(t, call(t, "GET", "/api/v1/torrents/"+id+"/files", nil), 200)
 		var x string
 		for _, f := range files.body["files"].([]any) {
 			fm := f.(map[string]any)
@@ -444,14 +459,15 @@ func TestEndToEnd(t *testing.T) {
 				x = fm["file_id"].(string)
 			}
 		}
-		rev := int(r.body["files_revision"].(float64))
-		waitOp(t, call(t, "PATCH", "/v1/torrents/"+id+"/selection", map[string]any{"expected_revision": rev, "file_ids": []string{x}}))
-		waitOp(t, call(t, "POST", "/v1/torrents/"+id+"/resume", nil))
+		_ = r
+		rev := files.s("files_revision")
+		must(t, call(t, "PATCH", "/api/v1/torrents/"+id+"/selection", map[string]any{"expected_revision": rev, "file_ids": []string{x}}), 200)
+		must(t, call(t, "POST", "/api/v1/torrents/"+id+"/resume", nil), 200)
 		r = waitState(t, id, 120*time.Second, complete)
 		if r.body["payload_complete"] == true {
 			t.Fatalf("partial selection claims payload complete: %s", r.raw)
 		}
-		files = must(t, call(t, "GET", "/v1/torrents/"+id+"/files", nil), 200)
+		files = must(t, call(t, "GET", "/api/v1/torrents/"+id+"/files", nil), 200)
 		for _, f := range files.body["files"].([]any) {
 			fm := f.(map[string]any)
 			isX := strings.HasSuffix(fm["path"].(string), "x.mkv")
@@ -460,7 +476,7 @@ func TestEndToEnd(t *testing.T) {
 			}
 		}
 		verifyFiles(t, id, "selective", "x.mkv")
-		if r := call(t, "GET", "/v1/torrents/"+id+"/files/f1/content", nil); r.status == 200 {
+		if r := call(t, "GET", "/api/v1/torrents/"+id+"/files/f1/content", nil); r.status == 200 {
 			t.Fatal("unselected file served")
 		}
 	})
@@ -471,16 +487,15 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 		magnet := "magnet:?xt=urn:btih:" + in.Identity.V1 + "&xt=urn:btmh:1220" + in.Identity.V2 + "&dn=magnetsrc&tr=" + url.QueryEscape("http://seeder:9000/announce")
-		plan := must(t, call(t, "POST", "/v1/torrent-plans", map[string]any{
+		plan := must(t, call(t, "POST", "/api/v1/torrent-plans", map[string]any{
 			"source": map[string]any{"type": "magnet", "magnet": magnet}, "destination_ref": "default", "selection_preset": "video",
 		}), 201)
 		if plan.s("metadata") != "unknown" || plan.s("torrent_version") != "hybrid" {
 			t.Fatalf("plan: %s", plan.raw)
 		}
-		op := waitOp(t, call(t, "POST", "/v1/torrents", map[string]any{"plan_ref": plan.s("plan_ref"), "expected_revision": 1, "idempotency_key": "magnet"}))
-		id := op.s("task_id")
+		id := createFromPlan(t, plan.s("plan_ref")).s("id")
 		waitState(t, id, 120*time.Second, complete)
-		files := must(t, call(t, "GET", "/v1/torrents/"+id+"/files", nil), 200)
+		files := must(t, call(t, "GET", "/api/v1/torrents/"+id+"/files", nil), 200)
 		for _, f := range files.body["files"].([]any) {
 			fm := f.(map[string]any)
 			want := strings.HasSuffix(fm["path"].(string), "/m.mkv")
@@ -495,26 +510,24 @@ func TestEndToEnd(t *testing.T) {
 		b := make([]byte, 20)
 		_, _ = rand.Read(b)
 		magnet := "magnet:?xt=urn:btih:" + hex.EncodeToString(b) + "&tr=" + url.QueryEscape("http://seeder:9000/announce")
-		plan := must(t, call(t, "POST", "/v1/torrent-plans", map[string]any{"source": map[string]any{"type": "magnet", "magnet": magnet}, "destination_ref": "default"}), 201)
-		id := waitOp(t, call(t, "POST", "/v1/torrents", map[string]any{"plan_ref": plan.s("plan_ref"), "expected_revision": 1, "idempotency_key": "nopeers"})).s("task_id")
+		plan := must(t, call(t, "POST", "/api/v1/torrent-plans", map[string]any{"source": map[string]any{"type": "magnet", "magnet": magnet}, "destination_ref": "default"}), 201)
+		id := createFromPlan(t, plan.s("plan_ref")).s("id")
 		time.Sleep(4 * time.Second)
 		if r := task(t, id); r.s("state") != "metadata_pending" || r.body["metadata_known"] == true {
 			t.Fatalf("no-peer magnet: %s", r.raw)
 		}
-		rp := must(t, call(t, "POST", "/v1/torrents/"+id+"/remove-plan", map[string]any{"delete_files": true}), 201)
-		waitOp(t, call(t, "POST", "/v1/torrents/"+id+"/remove", map[string]any{"plan_ref": rp.s("plan_ref"), "idempotency_key": "rm-nopeers"}))
-		if r := task(t, id); r.s("state") != "removed" {
-			t.Fatal(string(r.raw))
-		}
+		rp := must(t, call(t, "POST", "/api/v1/torrents/"+id+"/remove-plan", map[string]any{"delete_files": true}), 201)
+		must(t, call(t, "POST", "/api/v1/torrents/"+id+"/remove", map[string]any{"plan_ref": rp.s("plan_ref")}), 200)
+		must(t, call(t, "GET", "/api/v1/torrents/"+id, nil), 404)
 	})
 
 	pass(t, "content_range_and_head", func(t *testing.T) {
-		files := must(t, call(t, "GET", "/v1/torrents/"+singleID+"/files", nil), 200)
+		files := must(t, call(t, "GET", "/api/v1/torrents/"+singleID+"/files", nil), 200)
 		f := files.body["files"].([]any)[0].(map[string]any)
 		if f["content_available"] != true {
 			t.Fatalf("content not available: %v", f)
 		}
-		path := "/v1/torrents/" + singleID + "/files/" + f["file_id"].(string) + "/content"
+		path := "/api/v1/torrents/" + singleID + "/files/" + f["file_id"].(string) + "/content"
 		r := call(t, "GET", path, nil, "Range", "bytes=1000-1999")
 		src, _ := os.ReadFile(filepath.Join(work, "seed", "clip.mkv"))
 		if r.status != 206 || !bytes.Equal(r.raw, src[1000:2000]) {
@@ -533,42 +546,122 @@ func TestEndToEnd(t *testing.T) {
 
 	pass(t, "pause_resume_limits", func(t *testing.T) {
 		id := multiIDs["v1"]
-		op := waitOp(t, call(t, "POST", "/v1/torrents/"+id+"/pause", map[string]any{"idempotency_key": "p1"}))
-		if op.body["result"].(map[string]any)["state"] != "completed" {
+		op := must(t, call(t, "POST", "/api/v1/torrents/"+id+"/pause", nil), 200)
+		if op.s("state") != "completed" {
 			t.Fatalf("pause: %s", op.raw)
 		}
 		waitState(t, id, 15*time.Second, func(r res) bool { return r.s("state") == "completed" && r.body["seeding"] == false })
-		op = waitOp(t, call(t, "POST", "/v1/torrents/"+id+"/resume", map[string]any{"idempotency_key": "r1"}))
+		must(t, call(t, "POST", "/api/v1/torrents/"+id+"/resume", nil), 200)
 		waitState(t, id, 15*time.Second, func(r res) bool { return r.s("state") == "seeding" })
-		waitOp(t, call(t, "PATCH", "/v1/torrents/"+id+"/limits", map[string]any{"download_limit": 1 << 20, "upload_limit": 512 << 10}))
+		must(t, call(t, "PATCH", "/api/v1/torrents/"+id+"/limits", map[string]any{"download_limit": 1 << 20, "upload_limit": 512 << 10}), 200)
 		if r := task(t, id); r.body["download_limit"].(float64) != 1<<20 || r.body["upload_limit"].(float64) != 512<<10 {
 			t.Fatalf("limits: %s", r.raw)
 		}
-		if r := call(t, "PATCH", "/v1/torrents/"+id+"/limits", map[string]any{"download_limit": 100 << 20}); r.status != 422 {
+		if r := call(t, "PATCH", "/api/v1/torrents/"+id+"/limits", map[string]any{"download_limit": 100 << 20}); r.status != 422 {
 			t.Fatalf("limit above ceiling: %d", r.status)
 		}
 	})
 
+	pass(t, "webui_through_proxy", func(t *testing.T) {
+		jar, _ := cookiejar.New(nil)
+		c := &http.Client{Jar: jar, Timeout: 20 * time.Second}
+		post := func(path string, form url.Values, origin string) (int, string) {
+			req, _ := http.NewRequest("POST", apiURL+path, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Origin", origin)
+			resp, err := c.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			raw, _ := io.ReadAll(resp.Body)
+			return resp.StatusCode, string(raw)
+		}
+		get := func(path string) (int, string) {
+			resp, err := c.Get(apiURL + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			raw, _ := io.ReadAll(resp.Body)
+			return resp.StatusCode, string(raw)
+		}
+		if s, body := get("/"); s != 200 || !strings.Contains(body, "qBittorrent") {
+			t.Fatalf("webui index: %d", s)
+		}
+		if s, _ := post("/api/v2/auth/login", url.Values{"username": {"engine"}, "password": {os.Getenv("E2E_ENGINE_PASS")}}, "http://evil.example"); s != 403 {
+			t.Fatalf("cross-origin login: %d", s)
+		}
+		if s, body := post("/api/v2/auth/login", url.Values{"username": {"engine"}, "password": {os.Getenv("E2E_ENGINE_PASS")}}, apiURL); body != "Ok." {
+			t.Fatalf("webui login: %d %s", s, body)
+		}
+		if s, body := get("/api/v2/app/version"); s != 200 || body != "v5.1.0" {
+			t.Fatalf("version via proxy: %d %s", s, body)
+		}
+		in, _ := torrents.ParseTorrent(context.Background(), single, torrents.Policy{AllowPrivate: true, TrackerSchemes: []string{"http"}})
+		if s, body := get("/api/v2/torrents/info"); s != 200 || !strings.Contains(body, in.Identity.V1) {
+			t.Fatalf("app torrents not visible in webui: %d", s)
+		}
+		if s, _ := post("/api/v2/app/setPreferences", url.Values{"json": {`{"autorun_enabled":true}`}}, apiURL); s != 403 {
+			t.Fatalf("setPreferences: %d", s)
+		}
+		// One engine, one truth: a WebUI stop shows in the API at once.
+		if s, _ := post("/api/v2/torrents/stop", url.Values{"hashes": {in.Identity.V1}}, apiURL); s != 200 {
+			t.Fatalf("webui stop: %d", s)
+		}
+		waitState(t, singleID, 10*time.Second, func(r res) bool { return r.s("state") == "completed" })
+		must(t, call(t, "POST", "/api/v1/torrents/"+singleID+"/resume", nil), 200)
+		b := make([]byte, 20)
+		_, _ = rand.Read(b)
+		h := hex.EncodeToString(b)
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		_ = mw.WriteField("urls", "magnet:?xt=urn:btih:"+h)
+		_ = mw.WriteField("savepath", "/downloads/webui")
+		_ = mw.Close()
+		req, _ := http.NewRequest("POST", apiURL+"/api/v2/torrents/add", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		req.Header.Set("Origin", apiURL)
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if string(raw) != "Ok." {
+			t.Fatalf("webui add: %d %s", resp.StatusCode, raw)
+		}
+		// Listed and controllable through the API like any other torrent.
+		w := must(t, call(t, "GET", "/api/v1/torrents/"+h, nil), 200)
+		if w.s("added_via") != "other" {
+			t.Fatalf("webui torrent: %s", w.raw)
+		}
+		rp := must(t, call(t, "POST", "/api/v1/torrents/"+h+"/remove-plan", map[string]any{"delete_files": true}), 201)
+		must(t, call(t, "POST", "/api/v1/torrents/"+h+"/remove", map[string]any{"plan_ref": rp.s("plan_ref")}), 200)
+		if s, body := get("/api/v2/torrents/info"); s != 200 || strings.Contains(body, h) {
+			t.Fatal("api removal not visible in webui")
+		}
+	})
+
 	pass(t, "restart_recovery", func(t *testing.T) {
-		before := must(t, call(t, "GET", "/v1/torrents", nil), 200)
+		before := must(t, call(t, "GET", "/api/v1/torrents", nil), 200)
 		dc(t, "restart", "qbittorrent", "api")
 		waitReady(t)
-		after := must(t, call(t, "GET", "/v1/torrents", nil), 200)
+		after := must(t, call(t, "GET", "/api/v1/torrents", nil), 200)
 		if len(before.body["items"].([]any)) != len(after.body["items"].([]any)) {
 			t.Fatal("task count changed across restart")
 		}
 		waitState(t, singleID, 60*time.Second, func(r res) bool { return complete(r) && r.s("state") != "error" })
 	})
 
-	pass(t, "engine_offline_stale", func(t *testing.T) {
+	pass(t, "engine_offline", func(t *testing.T) {
 		dc(t, "stop", "qbittorrent")
-		waitState(t, singleID, 30*time.Second, func(r res) bool { return r.body["stale"] == true && r.s("engine_status") == "unavailable" })
-		if resp, err := http.Get(apiURL + "/readyz"); err != nil || resp.StatusCode != 503 {
-			t.Fatalf("readyz while engine down: %v", resp)
+		// No cached state: reads report the engine as unavailable.
+		if r := call(t, "GET", "/api/v1/torrents/"+singleID, nil); r.status != 503 || r.code() != "engine_unavailable" {
+			t.Fatalf("read while engine down: %d %s", r.status, r.raw)
 		}
-		// Tasks are kept, not deleted, while the engine is away.
-		if n := len(must(t, call(t, "GET", "/v1/torrents", nil), 200).body["items"].([]any)); n < 6 {
-			t.Fatalf("tasks lost while offline: %d", n)
+		if resp, err := http.Get(apiURL + "/api/readyz"); err != nil || resp.StatusCode != 503 {
+			t.Fatalf("readyz while engine down: %v", resp)
 		}
 		dc(t, "start", "qbittorrent")
 		waitReady(t)
@@ -577,21 +670,22 @@ func TestEndToEnd(t *testing.T) {
 
 	pass(t, "remove_keeps_files", func(t *testing.T) {
 		id := multiIDs["v2"]
-		rp := must(t, call(t, "POST", "/v1/torrents/"+id+"/remove-plan", map[string]any{"delete_files": false}), 201)
-		waitOp(t, call(t, "POST", "/v1/torrents/"+id+"/remove", map[string]any{"plan_ref": rp.s("plan_ref"), "idempotency_key": "rm-v2"}))
+		rp := must(t, call(t, "POST", "/api/v1/torrents/"+id+"/remove-plan", map[string]any{"delete_files": false}), 201)
+		must(t, call(t, "POST", "/api/v1/torrents/"+id+"/remove", map[string]any{"plan_ref": rp.s("plan_ref")}), 200)
 		verifyFiles(t, id, "multi", "a.mkv", "b.mkv")
 	})
 
 	pass(t, "remove_deletes_only_task_files", func(t *testing.T) {
 		id := multiIDs["hybrid"]
-		rp := must(t, call(t, "POST", "/v1/torrents/"+id+"/remove-plan", map[string]any{"delete_files": true}), 201)
+		rp := must(t, call(t, "POST", "/api/v1/torrents/"+id+"/remove-plan", map[string]any{"delete_files": true}), 201)
 		if rp.body["bytes_on_disk"].(float64) <= 0 {
 			t.Fatalf("plan: %s", rp.raw)
 		}
-		waitOp(t, call(t, "POST", "/v1/torrents/"+id+"/remove", map[string]any{"plan_ref": rp.s("plan_ref"), "idempotency_key": "rm-hy"}))
-		if _, err := os.Stat(filepath.Join(work, "downloads", "e2e", id)); !os.IsNotExist(err) {
-			t.Fatalf("hybrid dir still present: %v", err)
-		}
+		must(t, call(t, "POST", "/api/v1/torrents/"+id+"/remove", map[string]any{"plan_ref": rp.s("plan_ref")}), 200)
+		waitFor(t, "task directory removed", 30*time.Second, func() (bool, string) {
+			_, err := os.Stat(taskDirs[id])
+			return os.IsNotExist(err), fmt.Sprint(err)
+		})
 		verifyFiles(t, multiIDs["v1"], "multi", "a.mkv")
 		verifyFiles(t, multiIDs["v2"], "multi", "a.mkv")
 		verifyFiles(t, singleID, "clip.mkv", "clip.mkv")

@@ -42,27 +42,46 @@ func TestParseMagnet(t *testing.T) {
 	if err != nil || in.Identity.Version() != "hybrid" {
 		t.Fatalf("hybrid: %v", err)
 	}
-	cases := map[string]string{
+	rejected := map[string]string{
 		"http://example.com/x.torrent": "invalid_magnet",
 		"magnet:?dn=x":                 "invalid_magnet",
 		"magnet:?xt=urn:btih:zz":       "invalid_magnet",
-		"magnet:?xt=urn:btih:" + hash + "&xs=http://example.com/a.torrent":    "unsupported_magnet_parameter",
-		"magnet:?xt=urn:btih:" + hash + "&as=http://example.com/a.torrent":    "unsupported_magnet_parameter",
-		"magnet:?xt=urn:btih:" + hash + "&tr=http://127.0.0.1/announce":       "network_address_not_allowed",
-		"magnet:?xt=urn:btih:" + hash + "&tr=http://192.168.1.2/announce":     "network_address_not_allowed",
-		"magnet:?xt=urn:btih:" + hash + "&tr=http://[::1]/announce":           "network_address_not_allowed",
-		"magnet:?xt=urn:btih:" + hash + "&tr=http://localhost/announce":       "network_address_not_allowed",
-		"magnet:?xt=urn:btih:" + hash + "&tr=http://rebind.example.com/a":     "network_address_not_allowed",
-		"magnet:?xt=urn:btih:" + hash + "&tr=file:///etc/passwd":              "tracker_not_allowed",
-		"magnet:?xt=urn:btih:" + hash + "&tr=http://u:p@example.com/announce": "tracker_not_allowed",
-		"magnet:?xt=urn:btih:" + hash + "&ws=ftp://example.com/file":          "tracker_not_allowed",
-		"magnet:?xt=urn:btih:" + hash + "&x.pe=10.0.0.1:6881":                 "network_address_not_allowed",
+		"magnet:?xt=urn:btih:" + hash + "&xs=http://example.com/a.torrent": "unsupported_magnet_parameter",
+		"magnet:?xt=urn:btih:" + hash + "&as=http://example.com/a.torrent": "unsupported_magnet_parameter",
 	}
-	for raw, code := range cases {
+	for raw, code := range rejected {
 		_, err := ParseMagnet(ctx, raw, 4096, strict)
 		ie, ok := err.(*InputError)
 		if !ok || ie.Code != code {
 			t.Errorf("%s: got %v want %s", raw, err, code)
+		}
+	}
+	// Disallowed nested addresses are dropped, the magnet is kept.
+	dropped := map[string][2]int{ // raw suffix → {private, unsupported}
+		"&tr=http://127.0.0.1/announce":       {1, 0},
+		"&tr=http://192.168.1.2/announce":     {1, 0},
+		"&tr=http://[::1]/announce":           {1, 0},
+		"&tr=http://localhost/announce":       {1, 0},
+		"&tr=http://rebind.example.com/a":     {1, 0}, // DNS answer is 10.0.0.5
+		"&tr=file:///etc/passwd":              {0, 1},
+		"&tr=http://u:p@example.com/announce": {0, 1},
+		"&ws=ftp://example.com/file":          {0, 1},
+		"&x.pe=10.0.0.1:6881":                 {1, 0},
+		"&x.pe=bad":                           {0, 1},
+	}
+	for suffix, want := range dropped {
+		raw := "magnet:?xt=urn:btih:" + hash + "&tr=udp://tracker.example.com:6969/announce" + suffix
+		in, err := ParseMagnet(ctx, raw, 4096, strict)
+		if err != nil {
+			t.Errorf("%s: rejected: %v", suffix, err)
+			continue
+		}
+		if in.Removed.PrivateAddress != want[0] || in.Removed.Unsupported != want[1] || in.Trackers != 1 {
+			t.Errorf("%s: removed %+v trackers %d", suffix, in.Removed, in.Trackers)
+		}
+		if strings.Contains(in.Magnet, "127.0.0.1") || strings.Contains(in.Magnet, "rebind") || strings.Contains(in.Magnet, "10.0.0.1") ||
+			strings.Contains(in.Magnet, "localhost") || !strings.Contains(in.Magnet, "tracker.example.com") {
+			t.Errorf("%s: sanitised magnet %s", suffix, in.Magnet)
 		}
 	}
 	if _, err := ParseMagnet(ctx, "magnet:?xt=urn:btih:"+hash+strings.Repeat("&dn=x", 1000), 100, strict); err == nil {
@@ -118,13 +137,56 @@ func TestParseTorrent(t *testing.T) {
 		"backslash":   makeTorrent("Show", []any{file(1, `..\x`)}, ""),
 		"drive":       makeTorrent("C:evil", nil, ""),
 		"dotname":     makeTorrent("..", nil, ""),
-		"tracker":     makeTorrent("Show", nil, "http://10.1.1.1/announce"),
 		"not bencode": []byte("garbage"),
 	}
 	for name, data := range bad {
 		if _, err := ParseTorrent(ctx, data, strict); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+func TestTorrentTrackerFiltering(t *testing.T) {
+	ctx := context.Background()
+	info := map[string]any{"name": "Show", "piece length": 16384, "pieces": strings.Repeat("x", 20), "length": 100}
+	data := bencode.Encode(map[string]any{
+		"info":     info,
+		"announce": "udp://tracker.leechers-paradise.example:6969/announce", // resolves fine in this test
+		"announce-list": []any{
+			[]any{"http://127.0.0.1:6969/announce"},
+			[]any{"udp://tracker.example.com:6969/announce", "http://192.168.1.9/announce"},
+		},
+		"url-list": []any{"https://mirror.example.com/show", "http://10.0.0.8/show"},
+		"comment":  "kept",
+	})
+	in, err := ParseTorrent(ctx, data, strict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Removed.PrivateAddress != 3 || in.Trackers != 1 {
+		t.Fatalf("removed %+v trackers %d", in.Removed, in.Trackers)
+	}
+	// The rewritten torrent keeps the same identity and drops the addresses.
+	again, err := ParseTorrent(ctx, in.Torrent, strict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Identity != in.Identity || again.Removed.Total() != 0 {
+		t.Fatalf("rewritten torrent: %+v %+v", again.Identity, again.Removed)
+	}
+	for _, leak := range []string{"127.0.0.1", "192.168.1.9", "10.0.0.8"} {
+		if strings.Contains(string(in.Torrent), leak) {
+			t.Fatalf("%s still in torrent", leak)
+		}
+	}
+	if !strings.Contains(string(in.Torrent), "mirror.example.com") || !strings.Contains(string(in.Torrent), "4:kept") {
+		t.Fatal("allowed fields lost")
+	}
+	// A torrent without disallowed addresses is passed through byte for byte.
+	clean := makeTorrent("Clean", nil, "https://tracker.example.com/announce")
+	in, _ = ParseTorrent(ctx, clean, strict)
+	if string(in.Torrent) != string(clean) {
+		t.Fatal("clean torrent modified")
 	}
 }
 

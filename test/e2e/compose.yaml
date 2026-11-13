@@ -53,7 +53,6 @@ services:
     depends_on: [qbittorrent]
     volumes:
       - ${WORK}/api-config:/etc/bittorrent-server:ro
-      - ${WORK}/api-data:/data
       - ${WORK}/downloads:/downloads
     ports: ["127.0.0.1:${API_PORT:?}:8780"]
     networks: [p2p, edge]

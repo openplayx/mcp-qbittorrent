@@ -3,6 +3,9 @@
 # engine's security settings are deterministic: WebUI auth, CSRF and Host
 # header validation stay on; external programs, UPnP and the WebUI's own
 # HTTPS are off (the WebUI is only reachable on the private network).
+# The engine's own login ban is off: behind the bittorrent-server WebUI proxy
+# every browser shares one source address, so one guesser would lock out all
+# users and the API adapter. The proxy limits failures per real client IP.
 set -eu
 : "${QBT_USERNAME:?QBT_USERNAME required}"
 : "${QBT_PASSWORD_PBKDF2:?QBT_PASSWORD_PBKDF2 required}"
@@ -54,6 +57,7 @@ WebUI\\AuthSubnetWhitelistEnabled=false
 WebUI\\CSRFProtection=true
 WebUI\\ClickjackingProtection=true
 WebUI\\HostHeaderValidation=true
+WebUI\\MaxAuthenticationFailCount=0
 WebUI\\ServerDomains="${QBT_SERVER_DOMAINS}"
 WebUI\\UseUPnP=false
 WebUI\\HTTPS\\Enabled=false

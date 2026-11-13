@@ -11,13 +11,13 @@ offered to the model only after a server is configured.
 
 | Tool | Server call | Notes |
 |---|---|---|
-| `torrent_service_info` | `GET /v1/capabilities` | servers, destinations, limits, user-uploaded `input_ref`s |
-| `torrent_plan` | `POST /v1/torrent-plans` | magnet must appear in the user's messages; returns host `plan_ref` |
-| `torrent_add` | `POST /v1/torrents` | idempotency key derived from the plan |
-| `torrent_list` / `torrent_get` | `GET /v1/torrents[/{id}]` | list cached for the refresh interval |
-| `torrent_files` | `GET /v1/torrents/{id}/files` | issues `file_ref`s |
+| `torrent_service_info` | `GET /api/v1/capabilities` | servers, destinations, limits, user-uploaded `input_ref`s |
+| `torrent_plan` | `POST /api/v1/torrent-plans` | magnet must appear in the user's messages; returns host `plan_ref` |
+| `torrent_add` | `POST /api/v1/torrents` | repeating a plan returns the existing torrent |
+| `torrent_list` / `torrent_get` | `GET /api/v1/torrents[/{id}]` | live, every engine torrent |
+| `torrent_files` | `GET /api/v1/torrents/{id}/files` | issues `file_ref`s |
 | `torrent_select_files` | `PATCH …/selection` | preset or one `file_ref` + only/add/remove; user confirms |
-| `torrent_pause` / `torrent_resume` | `POST …/pause|resume` | succeeds once the engine reports the state |
+| `torrent_pause` / `torrent_resume` | `POST …/pause|resume` | returns once the engine reports the state |
 | `torrent_set_limits` | `PATCH …/limits` | KiB/s, within admin ceiling |
 | `torrent_remove_preview` | `POST …/remove-plan` | `delete_files` only if allowed in settings |
 | `torrent_remove` | `POST …/remove` | user confirms in the App; the model cannot self-confirm |
@@ -26,6 +26,13 @@ All references (`server_ref`, `task_ref`, `file_ref`, `plan_ref`,
 `removal_ref`, `input_ref`) are host-issued. No tool takes a URL, token,
 path or engine option. Results mark every task `location: server`,
 `in_app_library: false`, `offline_on_device: false`.
+
+## One live list
+
+The App keeps no task state or cache: the settings page and every tool call
+read `GET /api/v1/torrents`, which the server reads live from the engine.
+Torrents added in the WebUI appear in the same list (`added_via: other`) and
+are controllable like any other.
 
 ## Uploading `.torrent` files
 

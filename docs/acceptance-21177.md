@@ -48,7 +48,7 @@ Deployment: project `openplayx-bittorrent` in `/home/zyl/openplayx-bittorrent`
 
 | Item | Value |
 |---|---|
-| API entry | `http://192.168.1.211:18780` (LAN only, no TLS) |
+| API entry | `http://192.168.1.211:18780/api/` (LAN only, no TLS); WebUI at `http://192.168.1.211:18780/` |
 | Engine WebUI | `127.0.0.1:18781` on the host (SSH forward to the same port) |
 | Peer port | 46881 tcp+udp |
 | Download root | `/home/zyl/openplayx-bittorrent/downloads` (destination `default`) |
@@ -59,9 +59,11 @@ Deployment: project `openplayx-bittorrent` in `/home/zyl/openplayx-bittorrent`
 Results:
 
 - [x] Isolated Linux e2e on 211 (`E2E_PREBUILT=1`, binaries cross-built on the Mac): 13/13 passed in 37 s; project removed afterwards, other containers untouched. Report: `~/openplayx-bittorrent-e2e/test/e2e/reports/last-run.{log,json}` on 211.
-- [x] Deployed instance: `/readyz` ready, `/docs` 200, wrong token 401, capabilities show qBittorrent v5.1.0; WebUI not reachable from the LAN.
+- [x] Deployed instance: `/api/readyz` ready, `/api/docs` 200, wrong token 401, capabilities show qBittorrent v5.1.0; WebUI not reachable from the LAN.
 - [x] App tool chain against the deployed instance (`test/services/torrent_tools_test.dart` "real server", `TORRENT_E2E_NO_PEERS=1`): upload self-made `.torrent` → plan → add → metadata/stalled state → pause → resume → limits → delete-files denied by access scope → private tracker magnet rejected (`network_address_not_allowed`) → remove keeping files.
 - [ ] Full download through the deployed instance: not run there, because production policy (correctly) rejects private-network trackers and no public test content is used; full downloads are covered by the e2e run on the same host and images.
+- [x] WebUI through the proxy (redeployed `bb30c52-dirty`, 09:05 UTC): headless Chrome logged in at `http://192.168.1.211:18780/` with the engine account, page loaded without errors; `app/setPreferences` → 403; old `/v1/` paths no longer served. e2e on 211 rerun: 14/14 incl. `webui_through_proxy`.
+- [x] Public download with tracker filtering (stateless build): official Debian 13.7.0 arm64 netinst magnet plus `tracker.leechers-paradise.org` (resolves to 127.0.0.1) and a 192.168.x tracker → plan kept, 2 addresses removed; engine received only the Debian tracker; downloaded via the public swarm, SHA-256 matched Debian's `6e93fa17…`; then removed with its files.
 - [ ] App UI walkthrough on a device, host reboot, host-offline behaviour: pending.
 
 ## Earlier local verification (Docker Desktop, arm64)

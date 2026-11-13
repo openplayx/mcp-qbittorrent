@@ -15,7 +15,7 @@ arch="$(ssh_ uname -m)"
 case "$arch" in x86_64|amd64) goarch=amd64 ;; aarch64|arm64) goarch=arm64 ;; *) echo "unsupported arch $arch" >&2; exit 1 ;; esac
 "$root/scripts/build.sh" "linux/$goarch" >/dev/null
 version="$(cat "$root/dist/VERSION")"
-ssh_ "mkdir -p '$remote/dist' '$remote/deploy/config' '$remote/deploy/state/api' '$remote/deploy/state/qbittorrent'"
+ssh_ "mkdir -p '$remote/dist' '$remote/deploy/config' '$remote/deploy/state/qbittorrent'"
 ssh_ "test -f '$remote/deploy/.env' && test -f '$remote/deploy/config/config.json' && test -f '$remote/deploy/config/secrets.json'" || {
   echo "remote $remote/deploy/.env and config/{config,secrets}.json must exist first (see docs/operations.md)" >&2; exit 1; }
 rsync -a --delete --exclude .env --exclude releases.log --exclude '*.bak' --exclude 'config/config.json' --exclude 'config/secrets.json' --exclude state \

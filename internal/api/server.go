@@ -19,6 +19,7 @@ import (
 	apispec "github.com/openplayx/bittorrent-server/api"
 	"github.com/openplayx/bittorrent-server/internal/config"
 	"github.com/openplayx/bittorrent-server/internal/torrents"
+	"github.com/openplayx/bittorrent-server/internal/webui"
 )
 
 type Server struct {
@@ -29,8 +30,7 @@ type Server struct {
 	version string
 	mux     *http.ServeMux
 	limiter *limiter
-	// OperationWait lets fast operations answer synchronously.
-	OperationWait time.Duration
+	webui   *webui.Proxy
 	// Routes lists registered patterns (for the OpenAPI contract test).
 	Routes []string
 }
@@ -46,10 +46,25 @@ func New(svc *torrents.Service, cfg *config.Config, tokens []config.APIToken, lo
 	s := &Server{
 		svc: svc, cfg: cfg, tokens: tokens, log: log, version: version,
 		mux: http.NewServeMux(), limiter: newLimiter(cfg.Limits.RequestsPerMinute),
-		OperationWait: 3 * time.Second,
 	}
 	s.routes()
+	if cfg.WebUI.Enabled {
+		reserved := []string{}
+		for _, d := range cfg.Destinations {
+			reserved = append(reserved, cfg.DestinationPath(d))
+		}
+		p, err := webui.New(cfg.Engine.URL, cfg.DownloadRoot, reserved, cfg.WebUI.LoginFailuresPerClient, log)
+		if err == nil {
+			s.webui = p
+		}
+	}
 	return s
+}
+
+// isAPI: everything under /api/ belongs to this service except /api/v2/,
+// which is the engine WebUI's own API.
+func isAPI(p string) bool {
+	return strings.HasPrefix(p, "/api/") && p != "/api/v2" && !strings.HasPrefix(p, "/api/v2/")
 }
 
 func (s *Server) handle(pattern string, authed bool, h http.HandlerFunc) {
@@ -61,27 +76,27 @@ func (s *Server) handle(pattern string, authed bool, h http.HandlerFunc) {
 }
 
 func (s *Server) routes() {
-	s.handle("GET /healthz", false, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("GET /api/healthz", false, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": s.version})
 	})
-	s.handle("GET /readyz", false, s.readyz)
-	s.handle("GET /openapi.json", false, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("GET /api/readyz", false, s.readyz)
+	s.handle("GET /api/openapi.json", false, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(apispec.OpenAPI)
 	})
-	s.handle("GET /docs", false, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("GET /api/docs", false, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline' 'self'")
 		_, _ = w.Write(apispec.DocsHTML)
 	})
-	s.handle("GET /v1/capabilities", true, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("GET /api/v1/capabilities", true, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.svc.Capabilities(r.Context(), s.version))
 	})
-	s.handle("GET /v1/destinations", true, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("GET /api/v1/destinations", true, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"destinations": s.svc.Destinations()})
 	})
-	s.handle("POST /v1/torrent-inputs", true, s.createInput)
-	s.handle("POST /v1/torrent-plans", true, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("POST /api/v1/torrent-inputs", true, s.createInput)
+	s.handle("POST /api/v1/torrent-plans", true, func(w http.ResponseWriter, r *http.Request) {
 		var req torrents.PlanRequest
 		if !s.decode(w, r, &req) {
 			return
@@ -89,84 +104,71 @@ func (s *Server) routes() {
 		v, err := s.svc.CreatePlan(r.Context(), caller(r), req)
 		s.reply(w, r, http.StatusCreated, v, err)
 	})
-	s.handle("POST /v1/torrents", true, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("POST /api/v1/torrents", true, func(w http.ResponseWriter, r *http.Request) {
 		var req torrents.CreateRequest
 		if !s.decode(w, r, &req) {
 			return
 		}
-		if req.IdempotencyKey == "" {
-			req.IdempotencyKey = r.Header.Get("Idempotency-Key")
+		v, created, err := s.svc.CreateTask(r.Context(), caller(r), requestID(r), req)
+		status := http.StatusOK
+		if created {
+			status = http.StatusCreated
 		}
-		op, err := s.svc.CreateTask(r.Context(), caller(r), requestID(r), req)
-		s.operation(w, r, op.ID, err, true)
+		s.reply(w, r, status, v, err)
 	})
-	s.handle("GET /v1/torrents", true, s.list)
-	s.handle("GET /v1/torrents/{id}", true, func(w http.ResponseWriter, r *http.Request) {
-		v, err := s.svc.GetTask(r.Context(), caller(r), r.PathValue("id"))
+	s.handle("GET /api/v1/torrents", true, func(w http.ResponseWriter, r *http.Request) {
+		items, err := s.svc.ListTasks(r.Context())
+		s.reply(w, r, http.StatusOK, map[string]any{"items": items}, err)
+	})
+	s.handle("GET /api/v1/torrents/{id}", true, func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.svc.GetTask(r.Context(), r.PathValue("id"))
 		s.reply(w, r, http.StatusOK, v, err)
 	})
-	s.handle("GET /v1/torrents/{id}/files", true, func(w http.ResponseWriter, r *http.Request) {
-		v, err := s.svc.Files(r.Context(), caller(r), r.PathValue("id"))
+	s.handle("GET /api/v1/torrents/{id}/files", true, func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.svc.Files(r.Context(), r.PathValue("id"))
 		s.reply(w, r, http.StatusOK, v, err)
 	})
-	s.handle("PATCH /v1/torrents/{id}/selection", true, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("PATCH /api/v1/torrents/{id}/selection", true, func(w http.ResponseWriter, r *http.Request) {
 		var req torrents.SelectionRequest
 		if !s.decode(w, r, &req) {
 			return
 		}
-		s.idem(r, &req.IdempotencyKey)
-		op, err := s.svc.SetSelection(r.Context(), caller(r), requestID(r), r.PathValue("id"), req)
-		s.operation(w, r, op.ID, err, false)
+		v, err := s.svc.SetSelection(r.Context(), caller(r), requestID(r), r.PathValue("id"), req)
+		s.reply(w, r, http.StatusOK, v, err)
 	})
-	s.handle("POST /v1/torrents/{id}/pause", true, func(w http.ResponseWriter, r *http.Request) {
-		var req torrents.ControlRequest
-		if !s.decodeOptional(w, r, &req) {
-			return
-		}
-		s.idem(r, &req.IdempotencyKey)
-		op, err := s.svc.Pause(r.Context(), caller(r), requestID(r), r.PathValue("id"), req)
-		s.operation(w, r, op.ID, err, false)
+	s.handle("POST /api/v1/torrents/{id}/pause", true, func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.svc.Pause(r.Context(), caller(r), requestID(r), r.PathValue("id"))
+		s.reply(w, r, http.StatusOK, v, err)
 	})
-	s.handle("POST /v1/torrents/{id}/resume", true, func(w http.ResponseWriter, r *http.Request) {
-		var req torrents.ControlRequest
-		if !s.decodeOptional(w, r, &req) {
-			return
-		}
-		s.idem(r, &req.IdempotencyKey)
-		op, err := s.svc.Resume(r.Context(), caller(r), requestID(r), r.PathValue("id"), req)
-		s.operation(w, r, op.ID, err, false)
+	s.handle("POST /api/v1/torrents/{id}/resume", true, func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.svc.Resume(r.Context(), caller(r), requestID(r), r.PathValue("id"))
+		s.reply(w, r, http.StatusOK, v, err)
 	})
-	s.handle("PATCH /v1/torrents/{id}/limits", true, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("PATCH /api/v1/torrents/{id}/limits", true, func(w http.ResponseWriter, r *http.Request) {
 		var req torrents.LimitsRequest
 		if !s.decode(w, r, &req) {
 			return
 		}
-		s.idem(r, &req.IdempotencyKey)
-		op, err := s.svc.SetLimits(r.Context(), caller(r), requestID(r), r.PathValue("id"), req)
-		s.operation(w, r, op.ID, err, false)
+		v, err := s.svc.SetLimits(r.Context(), caller(r), requestID(r), r.PathValue("id"), req)
+		s.reply(w, r, http.StatusOK, v, err)
 	})
-	s.handle("POST /v1/torrents/{id}/remove-plan", true, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("POST /api/v1/torrents/{id}/remove-plan", true, func(w http.ResponseWriter, r *http.Request) {
 		var req torrents.RemovePlanRequest
 		if !s.decodeOptional(w, r, &req) {
 			return
 		}
-		v, err := s.svc.RemovePlan(r.Context(), caller(r), r.PathValue("id"), req)
+		v, err := s.svc.RemovePlan(r.Context(), r.PathValue("id"), req)
 		s.reply(w, r, http.StatusCreated, v, err)
 	})
-	s.handle("POST /v1/torrents/{id}/remove", true, func(w http.ResponseWriter, r *http.Request) {
+	s.handle("POST /api/v1/torrents/{id}/remove", true, func(w http.ResponseWriter, r *http.Request) {
 		var req torrents.RemoveRequest
 		if !s.decode(w, r, &req) {
 			return
 		}
-		s.idem(r, &req.IdempotencyKey)
-		op, err := s.svc.Remove(r.Context(), caller(r), requestID(r), r.PathValue("id"), req)
-		s.operation(w, r, op.ID, err, false)
+		v, err := s.svc.Remove(r.Context(), caller(r), requestID(r), r.PathValue("id"), req)
+		s.reply(w, r, http.StatusOK, v, err)
 	})
-	s.handle("GET /v1/operations/{id}", true, func(w http.ResponseWriter, r *http.Request) {
-		op, err := s.svc.GetOperation(r.Context(), caller(r), r.PathValue("id"))
-		s.reply(w, r, http.StatusOK, op, err)
-	})
-	s.handle("GET /v1/torrents/{id}/files/{file_id}/content", true, s.content)
+	s.handle("GET /api/v1/torrents/{id}/files/{file_id}/content", true, s.content)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -175,15 +177,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(rid) == 0 || len(rid) > 64 || strings.ContainsAny(rid, "\r\n ") {
 		rid = newRequestID()
 	}
-	w.Header().Set("X-Request-ID", rid)
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "no-store")
 	sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
-	ctx := context.WithValue(r.Context(), keyRequestID, rid)
-	s.mux.ServeHTTP(sw, r.WithContext(ctx))
+	route := "webui"
+	switch {
+	case isAPI(r.URL.Path):
+		w.Header().Set("X-Request-ID", rid)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		ctx := context.WithValue(r.Context(), keyRequestID, rid)
+		s.mux.ServeHTTP(sw, r.WithContext(ctx))
+		_, route = s.mux.Handler(r)
+	case s.webui != nil:
+		if e, ok := strings.CutPrefix(r.URL.Path, "/api/v2/"); ok {
+			route = "webui /api/v2/" + e
+		}
+		s.webui.ServeHTTP(sw, r)
+	case r.URL.Path == "/":
+		http.Redirect(sw, r, "/api/docs", http.StatusFound)
+	default:
+		http.NotFound(sw, r)
+	}
 	// Paths only; never query strings or bodies (magnets, tokens).
-	_, pattern := s.mux.Handler(r)
-	s.log.Info("request", "id", rid, "method", r.Method, "route", pattern, "status", sw.status, "ms", time.Since(start).Milliseconds())
+	s.log.Info("request", "id", rid, "method", r.Method, "route", route, "status", sw.status, "ms", time.Since(start).Milliseconds())
 }
 
 type statusWriter struct {
@@ -232,10 +247,10 @@ func (s *Server) auth(h http.HandlerFunc) http.HandlerFunc {
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	h := s.svc.Health(r.Context())
 	status := http.StatusOK
-	if !h.Database || !h.Engine {
+	if !h.Engine {
 		status = http.StatusServiceUnavailable
 	}
-	writeJSON(w, status, map[string]any{"ready": status == http.StatusOK, "database": h.Database, "engine": h.Engine})
+	writeJSON(w, status, map[string]any{"ready": h.Engine, "engine": h.Engine})
 }
 
 const maxJSONBody = 64 << 10
@@ -266,61 +281,12 @@ func (s *Server) decodeOptional(w http.ResponseWriter, r *http.Request, v any) b
 	return s.decode(w, r, v)
 }
 
-func (s *Server) idem(r *http.Request, key *string) {
-	if *key == "" {
-		*key = r.Header.Get("Idempotency-Key")
-	}
-}
-
 func (s *Server) reply(w http.ResponseWriter, r *http.Request, status int, v any, err error) {
 	if err != nil {
 		s.writeError(w, r, err)
 		return
 	}
 	writeJSON(w, status, v)
-}
-
-// operation answers 200 with a finished operation, or 202 with a pending
-// one plus a Location to poll.
-func (s *Server) operation(w http.ResponseWriter, r *http.Request, id string, err error, _ bool) {
-	if err != nil {
-		s.writeError(w, r, err)
-		return
-	}
-	op, err := s.svc.WaitOperation(r.Context(), caller(r), id, s.OperationWait)
-	if err != nil {
-		s.writeError(w, r, err)
-		return
-	}
-	status := http.StatusOK
-	if op.Status == "pending" {
-		status = http.StatusAccepted
-		w.Header().Set("Location", "/v1/operations/"+op.ID)
-	}
-	writeJSON(w, status, op)
-}
-
-func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	limit := 20
-	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 100 {
-			s.writeError(w, r, &torrents.Error{Status: http.StatusBadRequest, Code: "invalid_limit"})
-			return
-		}
-		limit = n
-	}
-	items, next, err := s.svc.ListTasks(r.Context(), caller(r), q.Get("cursor"), limit, q.Get("include_removed") == "true")
-	if err != nil {
-		s.writeError(w, r, err)
-		return
-	}
-	resp := map[string]any{"items": items}
-	if next != "" {
-		resp["next_cursor"] = next
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) createInput(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +326,7 @@ func (s *Server) createInput(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) content(w http.ResponseWriter, r *http.Request) {
-	f, info, err := s.svc.OpenContent(r.Context(), caller(r), r.PathValue("id"), r.PathValue("file_id"))
+	f, info, err := s.svc.OpenContent(r.Context(), r.PathValue("id"), r.PathValue("file_id"))
 	if err != nil {
 		s.writeError(w, r, err)
 		return

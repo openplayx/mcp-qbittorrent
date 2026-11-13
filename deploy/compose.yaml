@@ -15,7 +15,6 @@ services:
     depends_on: [qbittorrent]
     volumes:
       - ./config:/etc/bittorrent-server:ro
-      - ./state/api:/data
       - ${DOWNLOAD_ROOT:?set DOWNLOAD_ROOT}:/downloads
     ports:
       # Authenticated API entry. Bind to a LAN/VPN address or 127.0.0.1
@@ -23,7 +22,7 @@ services:
       - "${API_BIND:-127.0.0.1}:${API_PORT:?set API_PORT}:8780"
     networks: [engine, edge]
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8780/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8780/api/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3

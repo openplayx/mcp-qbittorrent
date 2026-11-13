@@ -1,6 +1,5 @@
 {
   "listen": "0.0.0.0:8780",
-  "data_dir": "/data",
   "secrets_file": "/etc/bittorrent-server/secrets.json",
   "public_name": "OpenPlayX BitTorrent",
   "engine": {
@@ -28,6 +27,6 @@
   "seeding": {"ratio_limit": 1.0, "seeding_time_minutes": 1440},
   "network": {"allow_private_networks": false, "tracker_schemes": ["http", "https", "udp"]},
   "files": {"content_access": true},
-  "reconcile_interval_seconds": 5,
-  "retention_days": 30
+  "webui": {"enabled": true, "login_failures_per_client": 5},
+  "reconcile_interval_seconds": 5
 }

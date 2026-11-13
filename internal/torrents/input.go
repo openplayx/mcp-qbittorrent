@@ -55,7 +55,25 @@ type Input struct {
 	Files    []PreviewFile // nil when metadata is unknown
 	Size     int64         // 0 when unknown
 	Private  bool
-	Trackers int
+	Trackers int     // trackers kept
+	Removed  Removed // nested addresses dropped by the network policy
+}
+
+// Removed counts addresses dropped from an input instead of rejecting it:
+// the engine never learns them, everything else still works.
+type Removed struct {
+	PrivateAddress int `json:"private_or_local_address"` // resolves to loopback/private/link-local
+	Unsupported    int `json:"unsupported_address"`      // bad scheme, credentials, malformed
+}
+
+func (r Removed) Total() int { return r.PrivateAddress + r.Unsupported }
+
+func (r *Removed) count(err error) {
+	if ie, ok := err.(*InputError); ok && ie.Code == "network_address_not_allowed" {
+		r.PrivateAddress++
+	} else {
+		r.Unsupported++
+	}
 }
 
 // InputError carries a stable error code for the API layer.
@@ -196,17 +214,21 @@ func ParseMagnet(ctx context.Context, raw string, maxLen int, p Policy) (*Input,
 			if len(values) > maxTrackers {
 				return nil, bad("too_many_trackers")
 			}
+			// Disallowed addresses are dropped one by one (e.g. a dead tracker
+			// domain now pointing at 127.0.0.1), not the whole magnet.
 			for _, v := range values {
 				if err := p.checkURL(ctx, v, p.TrackerSchemes); err != nil {
-					return nil, err
+					in.Removed.count(err)
+					continue
 				}
 				out.Add("tr", v)
+				in.Trackers++
 			}
-			in.Trackers = len(values)
 		case "ws":
 			for _, v := range values {
 				if err := p.checkURL(ctx, v, []string{"http", "https"}); err != nil {
-					return nil, err
+					in.Removed.count(err)
+					continue
 				}
 				out.Add("ws", v)
 			}
@@ -214,10 +236,12 @@ func ParseMagnet(ctx context.Context, raw string, maxLen int, p Policy) (*Input,
 			for _, v := range values {
 				host, port, err := net.SplitHostPort(v)
 				if n, perr := strconv.Atoi(port); err != nil || perr != nil || n <= 0 || n > 65535 {
-					return nil, bad("invalid_magnet")
+					in.Removed.Unsupported++
+					continue
 				}
 				if err := p.checkHost(ctx, host); err != nil {
-					return nil, err
+					in.Removed.count(err)
+					continue
 				}
 				out.Add("x.pe", v)
 			}
@@ -405,44 +429,80 @@ func ParseTorrent(ctx context.Context, data []byte, p Policy) (*Input, error) {
 		return nil, bad("invalid_torrent")
 	}
 
-	trackers := []string{}
-	if a, ok := root.Dict["announce"]; ok && a.Kind == 's' {
-		trackers = append(trackers, string(a.Str))
+	// Trackers and web seeds: drop disallowed ones, keep the rest. The info
+	// dict is copied verbatim, so the info hash is unchanged.
+	allowed := func(u string, schemes []string) bool {
+		if err := p.checkURL(ctx, u, schemes); err != nil {
+			in.Removed.count(err)
+			return false
+		}
+		return true
 	}
+	count := 0
+	var announce string
+	if a, ok := root.Dict["announce"]; ok && a.Kind == 's' {
+		count++
+		if allowed(string(a.Str), p.TrackerSchemes) {
+			announce = string(a.Str)
+		}
+	}
+	var tiers []any
 	if al, ok := root.Dict["announce-list"]; ok && al.Kind == 'l' {
 		for _, tier := range al.List {
+			var kept []any
 			for _, t := range tier.List {
-				if t.Kind == 's' {
-					trackers = append(trackers, string(t.Str))
+				if t.Kind != 's' {
+					continue
+				}
+				if count++; count > maxTrackers {
+					return nil, bad("too_many_trackers")
+				}
+				if allowed(string(t.Str), p.TrackerSchemes) {
+					kept = append(kept, string(t.Str))
+					in.Trackers++
 				}
 			}
+			if len(kept) > 0 {
+				tiers = append(tiers, kept)
+			}
 		}
 	}
-	if len(trackers) > maxTrackers {
-		return nil, bad("too_many_trackers")
+	if announce != "" && len(tiers) == 0 {
+		in.Trackers++
 	}
-	for _, t := range trackers {
-		if err := p.checkURL(ctx, t, p.TrackerSchemes); err != nil {
-			return nil, err
-		}
-	}
+	var seeds []any
 	if ul, ok := root.Dict["url-list"]; ok {
-		seeds := []string{}
+		list := ul.List
 		if ul.Kind == 's' {
-			seeds = append(seeds, string(ul.Str))
+			list = []bencode.Value{ul}
 		}
-		for _, s := range ul.List {
-			if s.Kind == 's' {
-				seeds = append(seeds, string(s.Str))
-			}
-		}
-		for _, s := range seeds {
-			if err := p.checkURL(ctx, s, []string{"http", "https"}); err != nil {
-				return nil, err
+		for _, v := range list {
+			if v.Kind == 's' && allowed(string(v.Str), []string{"http", "https"}) {
+				seeds = append(seeds, string(v.Str))
 			}
 		}
 	}
-	in.Trackers = len(trackers)
+	if in.Removed.Total() > 0 {
+		rebuilt := map[string]any{}
+		for k, v := range root.Dict {
+			if k != "announce" && k != "announce-list" && k != "url-list" {
+				rebuilt[k] = bencode.Raw(v.Raw)
+			}
+		}
+		if announce == "" && len(tiers) > 0 {
+			announce = tiers[0].([]any)[0].(string)
+		}
+		if announce != "" {
+			rebuilt["announce"] = announce
+		}
+		if len(tiers) > 0 {
+			rebuilt["announce-list"] = tiers
+		}
+		if len(seeds) > 0 {
+			rebuilt["url-list"] = seeds
+		}
+		in.Torrent = bencode.Encode(rebuilt)
+	}
 	return in, nil
 }
 

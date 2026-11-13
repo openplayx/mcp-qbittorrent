@@ -18,7 +18,9 @@ type Config struct {
 	Listen      string `json:"listen"`
 	TLSCertFile string `json:"tls_cert_file,omitempty"`
 	TLSKeyFile  string `json:"tls_key_file,omitempty"`
-	DataDir     string `json:"data_dir"`
+	// DataDir is accepted for compatibility and unused: the service keeps
+	// no state of its own.
+	DataDir     string `json:"data_dir,omitempty"`
 	SecretsFile string `json:"secrets_file"`
 	// PublicName is shown in capabilities so the App can label the instance.
 	PublicName   string        `json:"public_name"`
@@ -29,10 +31,11 @@ type Config struct {
 	Seeding      Seeding       `json:"seeding"`
 	Network      Network       `json:"network"`
 	Files        Files         `json:"files"`
+	WebUI        WebUI         `json:"webui"`
 	// ReconcileIntervalSeconds controls how often engine state is projected.
 	ReconcileIntervalSeconds int `json:"reconcile_interval_seconds"`
-	// RetentionDays prunes expired plans/inputs/finished operations.
-	RetentionDays int `json:"retention_days"`
+	// RetentionDays is accepted for compatibility and unused.
+	RetentionDays int `json:"retention_days,omitempty"`
 }
 
 type Engine struct {
@@ -77,6 +80,15 @@ type Network struct {
 	// loopback or link-local ranges. Only isolated test deployments set it.
 	AllowPrivateNetworks bool     `json:"allow_private_networks"`
 	TrackerSchemes       []string `json:"tracker_schemes"`
+}
+
+// WebUI exposes the engine's native WebUI through this server: every path
+// outside /api/ (plus the WebUI's own /api/v2/) is proxied to the engine,
+// with dangerous endpoints blocked and API-managed torrents protected.
+type WebUI struct {
+	Enabled bool `json:"enabled"`
+	// LoginFailuresPerClient within 15 minutes before a client IP is refused.
+	LoginFailuresPerClient int `json:"login_failures_per_client"`
 }
 
 type Files struct {
@@ -125,6 +137,7 @@ func Default() Config {
 			RequestsPerMinute:   240,
 		},
 		Seeding:                  Seeding{RatioLimit: 1, SeedingTimeMinutes: 1440},
+		WebUI:                    WebUI{Enabled: false, LoginFailuresPerClient: 5},
 		Network:                  Network{TrackerSchemes: []string{"http", "https", "udp"}},
 		ReconcileIntervalSeconds: 5,
 		RetentionDays:            30,
@@ -154,8 +167,8 @@ func Load(path string) (Config, error) {
 }
 
 func (c *Config) Validate() error {
-	if c.Listen == "" || c.DataDir == "" || c.Engine.URL == "" {
-		return errors.New("config: listen, data_dir and engine.url are required")
+	if c.Listen == "" || c.Engine.URL == "" {
+		return errors.New("config: listen and engine.url are required")
 	}
 	if !filepath.IsAbs(c.DownloadRoot) {
 		return errors.New("config: download_root must be absolute")

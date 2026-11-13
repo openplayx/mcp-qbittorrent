@@ -43,7 +43,9 @@ func within(base, target string) bool {
 }
 
 // realDir resolves dir and checks it lies strictly inside root.
-func realDir(root, dir string) (string, error) {
+func realDir(root, dir string) (string, error) { return resolveDir(root, dir, false) }
+
+func resolveDir(root, dir string, allowRoot bool) (string, error) {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", err
@@ -52,20 +54,20 @@ func realDir(root, dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !within(realRoot, realD) {
+	if !within(realRoot, realD) && !(allowRoot && realD == realRoot) {
 		return "", ErrOutside
 	}
 	return realD, nil
 }
 
-// Open opens rel below taskDir (which must itself be below root) for
-// reading. Symlinks that lead anywhere outside taskDir are refused.
+// Open opens rel below taskDir (root itself or below it) for reading.
+// Symlinks that lead anywhere outside taskDir are refused.
 func Open(root, taskDir, rel string) (*os.File, fs.FileInfo, error) {
 	r, err := cleanRel(rel)
 	if err != nil {
 		return nil, nil, err
 	}
-	realTask, err := realDir(root, taskDir)
+	realTask, err := resolveDir(root, taskDir, true)
 	if err != nil {
 		return nil, nil, err
 	}

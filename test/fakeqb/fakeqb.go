@@ -42,6 +42,7 @@ type Torrent struct {
 	DlLimit        int64
 	UpLimit        int64
 	Error          bool
+	AddedOn        int64
 }
 
 type Fake struct {
@@ -62,6 +63,9 @@ type Fake struct {
 	IgnoreStop    bool // stop answers 200 but does nothing
 	Calls         map[string]int
 	OnFileWritten func(t *Torrent, f File) // lets tests materialise payload
+	OnDeleteFiles func(t *Torrent)         // deleteFiles=true
+	LastAddURLs   string                   // last torrents/add "urls" field
+	clock         int64
 }
 
 func New() *Fake {
@@ -81,6 +85,13 @@ func (f *Fake) Set(change func(f *Fake)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	change(f)
+}
+
+// AddURLs returns the "urls" field of the last add request.
+func (f *Fake) AddURLs() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.LastAddURLs
 }
 
 // CallCount reports how often an API path was called.
@@ -124,6 +135,8 @@ func (f *Fake) AddExternal(t Torrent) {
 	if t.Hash == "" {
 		t.Hash = t.V1
 	}
+	f.clock++
+	t.AddedOn = 1_700_000_000 + f.clock
 	f.torrents[t.Hash] = &t
 	f.order = append(f.order, t.Hash)
 }
@@ -221,6 +234,16 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !strings.HasPrefix(r.URL.Path, "/api/v2/") {
+		// Static WebUI assets; the real engine serves its login page here.
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, "<title>qBittorrent WebUI</title> host="+r.Host)
+		return
+	}
+	if r.Header.Get("Authorization") != "" {
+		http.Error(w, "unexpected Authorization header", http.StatusBadRequest)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/")
 	f.mu.Lock()
 	f.Calls[path]++
@@ -281,6 +304,7 @@ func (f *Fake) add(w http.ResponseWriter, r *http.Request) {
 	}
 	t.DlLimit, _ = strconv.ParseInt(r.FormValue("dlLimit"), 10, 64)
 	t.UpLimit, _ = strconv.ParseInt(r.FormValue("upLimit"), 10, 64)
+	f.LastAddURLs = r.FormValue("urls")
 	if u := r.FormValue("urls"); u != "" {
 		q, _ := url.ParseQuery(strings.TrimPrefix(u, "magnet:?"))
 		for _, xt := range q["xt"] {
@@ -336,6 +360,8 @@ func (f *Fake) add(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "Fails.")
 		return
 	}
+	f.clock++
+	t.AddedOn = 1_700_000_000 + f.clock
 	f.torrents[t.Hash] = t
 	f.order = append(f.order, t.Hash)
 	if f.DropAddReply {
@@ -375,6 +401,7 @@ func (t *Torrent) state() string {
 
 func (f *Fake) info(w http.ResponseWriter, r *http.Request) {
 	tag := r.URL.Query().Get("tag")
+	only := r.URL.Query().Get("hashes")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []map[string]any{}
@@ -386,6 +413,9 @@ func (f *Fake) info(w http.ResponseWriter, r *http.Request) {
 	for _, h := range hashes {
 		t := f.torrents[h]
 		if tag != "" && !contains(t.Tags, tag) {
+			continue
+		}
+		if only != "" && only != t.Hash {
 			continue
 		}
 		var size, total, completed int64
@@ -405,7 +435,7 @@ func (f *Fake) info(w http.ResponseWriter, r *http.Request) {
 			"progress": progress, "size": size, "total_size": total, "completed": completed, "amount_left": size - completed,
 			"downloaded": completed, "uploaded": 0, "dlspeed": 1000, "upspeed": 0, "dl_limit": t.DlLimit, "up_limit": t.UpLimit,
 			"num_seeds": 1, "num_leechs": 0, "ratio": 0, "eta": 10, "save_path": t.SavePath, "tags": strings.Join(t.Tags, ", "),
-			"has_metadata": t.HasMetadata,
+			"has_metadata": t.HasMetadata, "added_on": t.AddedOn,
 		})
 	}
 	_ = json.NewEncoder(w).Encode(out)
@@ -469,7 +499,28 @@ func (f *Fake) control(w http.ResponseWriter, path string, form url.Values) {
 	case "torrents/start":
 		t.Stopped = false
 	case "torrents/delete":
+		if form.Get("deleteFiles") == "true" && f.OnDeleteFiles != nil {
+			f.OnDeleteFiles(t)
+		}
 		delete(f.torrents, t.Hash)
+	case "torrents/addTags":
+		for _, tag := range strings.Split(form.Get("tags"), ",") {
+			if tag = strings.TrimSpace(tag); tag != "" && !contains(t.Tags, tag) {
+				t.Tags = append(t.Tags, tag)
+			}
+		}
+	case "torrents/removeTags":
+		drop := map[string]bool{}
+		for _, tag := range strings.Split(form.Get("tags"), ",") {
+			drop[strings.TrimSpace(tag)] = true
+		}
+		kept := t.Tags[:0]
+		for _, tag := range t.Tags {
+			if !drop[strings.TrimSpace(tag)] {
+				kept = append(kept, tag)
+			}
+		}
+		t.Tags = kept
 	case "torrents/setDownloadLimit":
 		t.DlLimit, _ = strconv.ParseInt(form.Get("limit"), 10, 64)
 	case "torrents/setUploadLimit":

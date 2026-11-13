@@ -2,11 +2,11 @@
   "openapi": "3.1.0",
   "info": {
     "title": "OpenPlayX BitTorrent API",
-    "version": "1.0.0",
-    "description": "Restricted HTTP API over a pinned qBittorrent engine. Callers use logical destination refs and service task IDs; engine credentials, SIDs, full magnets and absolute paths are never returned.",
+    "version": "2.0.0",
     "license": {
       "name": "GNU GPL v3 (see COPYING)"
-    }
+    },
+    "description": "Stateless HTTP API over a pinned qBittorrent engine: every read is live from the engine and all engine torrents (including WebUI-added ones) are listed and controllable. Plans and removal confirmations are signed tokens. Service endpoints live under /api/ (except /api/v2/, the engine WebUI's own API); other paths serve the engine WebUI through a guarded proxy when enabled. Engine credentials, SIDs, full magnets and absolute paths are never returned."
   },
   "security": [
     {
@@ -14,7 +14,7 @@
     }
   ],
   "paths": {
-    "/healthz": {
+    "/api/healthz": {
       "get": {
         "summary": "Process liveness",
         "security": [],
@@ -32,9 +32,9 @@
         }
       }
     },
-    "/readyz": {
+    "/api/readyz": {
       "get": {
-        "summary": "Database and engine readiness",
+        "summary": "Engine reachable (probed live)",
         "security": [],
         "responses": {
           "200": {
@@ -60,7 +60,7 @@
         }
       }
     },
-    "/openapi.json": {
+    "/api/openapi.json": {
       "get": {
         "summary": "This document",
         "security": [],
@@ -71,7 +71,7 @@
         }
       }
     },
-    "/docs": {
+    "/api/docs": {
       "get": {
         "summary": "Human-readable API docs",
         "security": [],
@@ -82,9 +82,9 @@
         }
       }
     },
-    "/v1/capabilities": {
+    "/api/v1/capabilities": {
       "get": {
-        "summary": "Engine version, inputs, limits, destinations and operations",
+        "summary": "Engine version, inputs, limits, destinations",
         "responses": {
           "200": {
             "description": "Capabilities",
@@ -105,9 +105,9 @@
         }
       }
     },
-    "/v1/destinations": {
+    "/api/v1/destinations": {
       "get": {
-        "summary": "Logical destinations with free-space summary",
+        "summary": "Logical destinations with free space",
         "responses": {
           "200": {
             "description": "Destinations",
@@ -128,9 +128,9 @@
         }
       }
     },
-    "/v1/torrent-inputs": {
+    "/api/v1/torrent-inputs": {
       "post": {
-        "summary": "Upload a size-limited .torrent; returns a short-lived input_ref",
+        "summary": "Upload a size-limited .torrent; kept in memory briefly, returns input_ref",
         "requestBody": {
           "required": true,
           "content": {
@@ -188,9 +188,9 @@
         }
       }
     },
-    "/v1/torrent-plans": {
+    "/api/v1/torrent-plans": {
       "post": {
-        "summary": "Validate a magnet or input_ref, destination and strategy; returns an expiring plan. Contacts no peers.",
+        "summary": "Validate a magnet or input_ref, destination and strategy; returns a signed, expiring plan_ref. Contacts no peers.",
         "requestBody": {
           "required": true,
           "content": {
@@ -229,22 +229,16 @@
           },
           "429": {
             "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/torrents": {
+    "/api/v1/torrents": {
       "post": {
-        "summary": "Create a task from a plan (async)",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "summary": "Add the planned torrent; returns once the engine lists it. Repeating returns the existing torrent (200).",
         "requestBody": {
           "required": true,
           "content": {
@@ -256,29 +250,22 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Operation finished (succeeded or failed)",
+          "201": {
+            "description": "Created",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Operation"
+                  "$ref": "#/components/schemas/Task"
                 }
               }
             }
           },
-          "202": {
-            "description": "Operation pending; poll Location",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
+          "200": {
+            "description": "Already in the engine",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Operation"
+                  "$ref": "#/components/schemas/Task"
                 }
               }
             }
@@ -303,41 +290,17 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
       "get": {
-        "summary": "List this caller's tasks",
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20
-            }
-          },
-          {
-            "name": "include_removed",
-            "in": "query",
-            "schema": {
-              "type": "boolean",
-              "default": false
-            }
-          }
-        ],
+        "summary": "All torrents in the engine, read live (including ones added in the WebUI)",
         "responses": {
           "200": {
-            "description": "Page",
+            "description": "List",
             "content": {
               "application/json": {
                 "schema": {
@@ -346,30 +309,31 @@
               }
             }
           },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
           "401": {
             "$ref": "#/components/responses/Error"
           },
           "429": {
             "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/torrents/{id}": {
+    "/api/v1/torrents/{id}": {
       "get": {
-        "summary": "Task download, seeding, error and completeness state",
+        "summary": "One torrent, read live",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           }
         ],
         "responses": {
@@ -391,22 +355,26 @@
           },
           "429": {
             "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/torrents/{id}/files": {
+    "/api/v1/torrents/{id}/files": {
       "get": {
-        "summary": "Files once metadata is known",
+        "summary": "Files once metadata is known, with the selection revision",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           }
         ],
         "responses": {
@@ -428,22 +396,26 @@
           },
           "429": {
             "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/torrents/{id}/selection": {
+    "/api/v1/torrents/{id}/selection": {
       "patch": {
-        "summary": "Update file selection against an expected files_revision",
+        "summary": "Change the file selection against expected_revision",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           }
         ],
         "requestBody": {
@@ -458,28 +430,11 @@
         },
         "responses": {
           "200": {
-            "description": "Operation finished (succeeded or failed)",
+            "description": "Files after the change",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Operation"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Operation pending; poll Location",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Operation"
+                  "$ref": "#/components/schemas/Files"
                 }
               }
             }
@@ -504,58 +459,82 @@
           },
           "429": {
             "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/torrents/{id}/pause": {
+    "/api/v1/torrents/{id}/pause": {
       "post": {
-        "summary": "Request stop; succeeds once the engine reports it stopped",
+        "summary": "Stop; returns once the engine reports it stopped",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           }
         ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ControlRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
-            "description": "Operation finished (succeeded or failed)",
+            "description": "Task",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Operation"
+                  "$ref": "#/components/schemas/Task"
                 }
               }
             }
           },
-          "202": {
-            "description": "Operation pending; poll Location",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/torrents/{id}/resume": {
+      "post": {
+        "summary": "Start (never force-start); quota and disk holds are re-checked",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Operation"
+                  "$ref": "#/components/schemas/Task"
                 }
               }
             }
@@ -571,89 +550,29 @@
           },
           "429": {
             "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/torrents/{id}/resume": {
-      "post": {
-        "summary": "Resume (never force-start)",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Service task ID (tsk_…), never an engine hash."
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ControlRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Operation finished (succeeded or failed)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Operation"
-                }
-              }
-            }
           },
-          "202": {
-            "description": "Operation pending; poll Location",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Operation"
-                }
-              }
-            }
-          },
-          "401": {
+          "503": {
             "$ref": "#/components/responses/Error"
           },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          },
-          "429": {
+          "504": {
             "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/torrents/{id}/limits": {
+    "/api/v1/torrents/{id}/limits": {
       "patch": {
-        "summary": "Per-task rate limits within administrator ceilings",
+        "summary": "Per-torrent rates within administrator ceilings",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           }
         ],
         "requestBody": {
@@ -668,28 +587,11 @@
         },
         "responses": {
           "200": {
-            "description": "Operation finished (succeeded or failed)",
+            "description": "Task",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Operation"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Operation pending; poll Location",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Operation"
+                  "$ref": "#/components/schemas/Task"
                 }
               }
             }
@@ -703,30 +605,34 @@
           "404": {
             "$ref": "#/components/responses/Error"
           },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          },
           "422": {
             "$ref": "#/components/responses/Error"
           },
           "429": {
             "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/torrents/{id}/remove-plan": {
+    "/api/v1/torrents/{id}/remove-plan": {
       "post": {
-        "summary": "Preview removal scope and impact",
+        "summary": "Preview removal; returns a signed plan_ref (files kept unless delete_files)",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           }
         ],
         "requestBody": {
@@ -756,27 +662,28 @@
           "404": {
             "$ref": "#/components/responses/Error"
           },
-          "409": {
+          "429": {
             "$ref": "#/components/responses/Error"
           },
-          "429": {
+          "503": {
             "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/torrents/{id}/remove": {
+    "/api/v1/torrents/{id}/remove": {
       "post": {
-        "summary": "Apply a still-valid remove plan (files kept unless the plan said otherwise)",
+        "summary": "Apply a remove plan",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           }
         ],
         "requestBody": {
@@ -791,28 +698,11 @@
         },
         "responses": {
           "200": {
-            "description": "Operation finished (succeeded or failed)",
+            "description": "Removed",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Operation"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Operation pending; poll Location",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Operation"
+                  "$ref": "#/components/schemas/RemoveResult"
                 }
               }
             }
@@ -823,9 +713,6 @@
           "401": {
             "$ref": "#/components/responses/Error"
           },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
           "409": {
             "$ref": "#/components/responses/Error"
           },
@@ -834,58 +721,29 @@
           },
           "429": {
             "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/v1/operations/{id}": {
+    "/api/v1/torrents/{id}/files/{file_id}/content": {
       "get": {
-        "summary": "Async operation result",
+        "summary": "Read a complete file (Range supported). Only when capabilities.file_content is true.",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Operation"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/torrents/{id}/files/{file_id}/content": {
-      "get": {
-        "summary": "Read a complete authorised file (Range supported; HEAD also served). Only when capabilities.file_content is true.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           },
           {
             "name": "file_id",
@@ -939,16 +797,18 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
             },
-            "description": "Service task ID (tsk_…), never an engine hash."
+            "description": "Engine torrent hash (v1 info hash, or the 40-hex id of a v2-only torrent)."
           },
           {
             "name": "file_id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^f[0-9]+$"
             }
           }
         ],
@@ -1042,9 +902,6 @@
           "ready": {
             "type": "boolean"
           },
-          "database": {
-            "type": "boolean"
-          },
           "engine": {
             "type": "boolean"
           }
@@ -1115,7 +972,19 @@
               "type": "string"
             }
           },
+          "state_storage": {
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          "all_engine_torrents": {
+            "type": "boolean"
+          },
           "file_content": {
+            "type": "boolean"
+          },
+          "webui": {
             "type": "boolean"
           },
           "streaming_while_downloading": {
@@ -1164,6 +1033,18 @@
           },
           "private": {
             "type": "boolean"
+          },
+          "removed_addresses": {
+            "type": "object",
+            "description": "Nested addresses dropped by the network policy (the input is kept)",
+            "properties": {
+              "private_or_local_address": {
+                "type": "integer"
+              },
+              "unsupported_address": {
+                "type": "integer"
+              }
+            }
           },
           "expires_at": {
             "type": "string",
@@ -1232,10 +1113,8 @@
         "type": "object",
         "properties": {
           "plan_ref": {
-            "type": "string"
-          },
-          "revision": {
-            "type": "integer"
+            "type": "string",
+            "description": "Opaque signed token; valid until expires_at or a server restart"
           },
           "expires_at": {
             "type": "string",
@@ -1298,76 +1177,40 @@
           "upload_limit": {
             "type": "integer"
           },
+          "trackers": {
+            "type": "integer",
+            "description": "trackers kept after filtering"
+          },
+          "removed_addresses": {
+            "type": "object",
+            "description": "Nested addresses dropped by the network policy (the input is kept)",
+            "properties": {
+              "private_or_local_address": {
+                "type": "integer"
+              },
+              "unsupported_address": {
+                "type": "integer"
+              }
+            }
+          },
           "warnings": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "e.g. metadata_unknown, addresses_removed, no_trackers_dht_only, private_torrent"
           }
         }
       },
       "CreateRequest": {
         "type": "object",
         "required": [
-          "plan_ref",
-          "expected_revision"
+          "plan_ref"
         ],
         "additionalProperties": false,
         "properties": {
           "plan_ref": {
             "type": "string"
-          },
-          "expected_revision": {
-            "type": "integer"
-          },
-          "idempotency_key": {
-            "type": "string",
-            "description": "Required here or in the Idempotency-Key header"
-          }
-        }
-      },
-      "Operation": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "create",
-              "selection",
-              "pause",
-              "resume",
-              "limits",
-              "remove"
-            ]
-          },
-          "task_id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "succeeded",
-              "failed"
-            ]
-          },
-          "error_code": {
-            "type": "string"
-          },
-          "retryable": {
-            "type": "boolean"
-          },
-          "result": {
-            "type": "object"
-          },
-          "created_at": {
-            "type": "integer"
-          },
-          "updated_at": {
-            "type": "integer"
           }
         }
       },
@@ -1391,14 +1234,13 @@
               "stalled",
               "completed",
               "seeding",
-              "error",
-              "removed"
+              "error"
             ]
           },
           "hold_reason": {
             "type": "string",
             "enum": [
-              "awaiting_selection",
+              "awaiting_start",
               "quota_exceeded",
               "disk_low",
               "no_files_match_preset"
@@ -1407,14 +1249,18 @@
           "error_code": {
             "type": "string"
           },
-          "input_kind": {
-            "type": "string"
-          },
           "torrent_version": {
             "type": "string"
           },
           "destination_ref": {
             "type": "string"
+          },
+          "added_via": {
+            "type": "string",
+            "enum": [
+              "app",
+              "other"
+            ]
           },
           "progress": {
             "type": "number",
@@ -1471,41 +1317,13 @@
           "seeding": {
             "type": "boolean"
           },
-          "files_revision": {
-            "type": "integer"
-          },
-          "revision": {
-            "type": "integer"
-          },
-          "stale": {
-            "type": "boolean",
-            "description": "true when engine state could not be observed recently"
-          },
-          "engine_status": {
-            "type": "string",
-            "enum": [
-              "available",
-              "unavailable"
-            ]
-          },
-          "observed_at": {
+          "added_at": {
             "type": "string",
             "format": "date-time"
           },
-          "created_at": {
+          "completed_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "removed_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "data_deleted": {
-            "type": "boolean"
           }
         }
       },
@@ -1517,9 +1335,6 @@
             "items": {
               "$ref": "#/components/schemas/Task"
             }
-          },
-          "next_cursor": {
-            "type": "string"
           }
         }
       },
@@ -1531,7 +1346,7 @@
           },
           "path": {
             "type": "string",
-            "description": "Relative to the task, never an absolute server path"
+            "description": "Relative to the torrent, never an absolute path"
           },
           "size": {
             "type": "integer"
@@ -1563,10 +1378,7 @@
             "type": "boolean"
           },
           "files_revision": {
-            "type": "integer"
-          },
-          "stale": {
-            "type": "boolean"
+            "type": "string"
           },
           "files": {
             "type": "array",
@@ -1582,9 +1394,10 @@
           "expected_revision"
         ],
         "additionalProperties": false,
+        "description": "Exactly one of preset or file_ids.",
         "properties": {
           "expected_revision": {
-            "type": "integer"
+            "type": "string"
           },
           "preset": {
             "type": "string",
@@ -1599,19 +1412,6 @@
               "type": "string"
             },
             "maxItems": 20000
-          },
-          "idempotency_key": {
-            "type": "string"
-          }
-        },
-        "description": "Exactly one of preset or file_ids."
-      },
-      "ControlRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "idempotency_key": {
-            "type": "string"
           }
         }
       },
@@ -1626,9 +1426,6 @@
           "upload_limit": {
             "type": "integer",
             "minimum": 0
-          },
-          "idempotency_key": {
-            "type": "string"
           }
         }
       },
@@ -1663,11 +1460,8 @@
           "bytes_on_disk": {
             "type": "integer"
           },
-          "shared_with_tasks": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+          "added_via": {
+            "type": "string"
           },
           "stops_seeding": {
             "type": "boolean"
@@ -1681,12 +1475,6 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "task_revision": {
-            "type": "integer"
-          },
-          "confirmation_digest": {
-            "type": "string"
           }
         }
       },
@@ -1699,9 +1487,20 @@
         "properties": {
           "plan_ref": {
             "type": "string"
-          },
-          "idempotency_key": {
+          }
+        }
+      },
+      "RemoveResult": {
+        "type": "object",
+        "properties": {
+          "task_id": {
             "type": "string"
+          },
+          "removed": {
+            "type": "boolean"
+          },
+          "data_deleted": {
+            "type": "boolean"
           }
         }
       }

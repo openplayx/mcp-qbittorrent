@@ -29,7 +29,7 @@ cleanup() {
 trap cleanup EXIT
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 rm -rf "$WORK"
-mkdir -p "$WORK"/{seed,seeder-config,engine-config,downloads,api-config,api-data}
+mkdir -p "$WORK"/{seed,seeder-config,engine-config,downloads,api-config}
 
 case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; *) arch=arm64 ;; esac
 if [ "${E2E_PREBUILT:-0}" = 1 ]; then
@@ -51,7 +51,7 @@ export E2E_TOKEN="$(echo "$token_line" | sed -n 's/^token: //p')"
 token_sha="$(printf '%s' "$E2E_TOKEN" | { command -v sha256sum >/dev/null && sha256sum || shasum -a 256; } | cut -d' ' -f1)"
 cat > "$WORK/api-config/config.json" <<JSON
 {
-  "listen": "0.0.0.0:8780", "data_dir": "/data", "secrets_file": "/etc/bittorrent-server/secrets.json",
+  "listen": "0.0.0.0:8780", "secrets_file": "/etc/bittorrent-server/secrets.json",
   "public_name": "OpenPlayX BitTorrent e2e",
   "engine": {"url": "http://qbittorrent:8080", "supported_versions": ["v5.1.0"], "min_webapi_version": "2.11.0", "timeout_seconds": 5},
   "download_root": "/downloads",
@@ -62,7 +62,8 @@ cat > "$WORK/api-config/config.json" <<JSON
   "seeding": {"ratio_limit": -2, "seeding_time_minutes": -2},
   "network": {"allow_private_networks": true, "tracker_schemes": ["http"]},
   "files": {"content_access": true},
-  "reconcile_interval_seconds": 1, "retention_days": 1
+  "webui": {"enabled": true, "login_failures_per_client": 5},
+  "reconcile_interval_seconds": 1
 }
 JSON
 printf '{"api_tokens":[{"caller":"e2e-app","token_sha256":"%s"}],"engine":{"username":"engine","password":"%s"}}\n' "$token_sha" "$ENGINE_PASS" > "$WORK/api-config/secrets.json"
@@ -76,7 +77,7 @@ if [ "${KEEP:-0}" = 1 ]; then
 fi
 export E2E_API="http://127.0.0.1:$API_PORT" E2E_SEEDER="http://127.0.0.1:$SEEDER_PORT"
 export E2E_COMPOSE="$(dc_cmd)"
-export E2E_SECRETS="$ENGINE_PASS,$SEEDER_PASS,$E2E_TOKEN"
+export E2E_SECRETS="$ENGINE_PASS,$SEEDER_PASS,$E2E_TOKEN" E2E_ENGINE_PASS="$ENGINE_PASS"
 set +e
 if [ "${E2E_PREBUILT:-0}" = 1 ]; then
   (cd test/e2e && ./e2e.test -test.v -test.count=1 -test.timeout 15m) 2>&1 | tee "$WORK/e2e.log"
