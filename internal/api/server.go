@@ -169,6 +169,9 @@ func (s *Server) routes() {
 		s.reply(w, r, http.StatusOK, v, err)
 	})
 	s.handle("GET /api/v1/torrents/{id}/files/{file_id}/content", true, s.content)
+	// MCP is JSON-RPC, not a REST resource, so it stays out of Routes (the
+	// OpenAPI contract); other methods on the path get 405 from the mux.
+	s.mux.HandleFunc("POST /api/mcp", s.auth(s.mcp))
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

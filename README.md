@@ -93,6 +93,23 @@ Without the WebUI, `/` redirects to `/api/docs`.
 
 Full schema: `api/openapi.json`, rendered at `/api/docs`.
 
+## MCP
+
+`POST /api/mcp` exposes `list_destinations`, `create_plan`, `start_download`,
+`list_downloads`, `get_download`, `pause`, `resume`, `create_remove_plan` and
+`remove`. Downloads and removals stay two-step (plan, then execute with the
+`plan_ref`); `.torrent` files are uploaded with `POST /api/v1/torrent-inputs`
+and passed to `create_plan` as `input_ref`.
+
+Streamable HTTP subset: single JSON-RPC 2.0 messages over `POST`, answered
+with `application/json` (no SSE, no server-initiated messages); stateless (no
+`Mcp-Session-Id`); `initialize`, `ping`, `tools/list`, `tools/call` and
+notifications; protocol versions 2025-11-25, 2025-06-18 and 2025-03-26. The
+same bearer token as the HTTP API is required on every request; requests with
+a foreign `Origin` are refused. Business failures are tool results with
+`isError: true` and the HTTP API's error codes. The MCP layer calls the same
+service code as the HTTP handlers (no second state, no loopback request).
+
 ## WebUI
 
 Users open the server root in a browser and log in with the engine's WebUI
