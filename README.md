@@ -1,10 +1,12 @@
 # mcp-qbittorrent
 
+English | [简体中文](README.zh-CN.md)
+
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](COPYING)
 
 Server-side BitTorrent downloads for [OpenPlayX](https://github.com/openplayx/openplayx)
-as an MCP server and HTTP API (formerly *bittorrent-server*). A restricted HTTP API over a pinned **qbittorrent-nox 5.1.0** engine. The
-OpenPlayX App calls it through host-registered AI tools to add magnet /
+as an MCP server and HTTP API (formerly *bittorrent-server*): a restricted HTTP
+API over a pinned **qbittorrent-nox 5.1.0** engine. The OpenPlayX App calls it through host-registered AI tools to add magnet /
 `.torrent` downloads, follow progress, select files, pause, resume, limit and
 remove tasks. Downloads run on the server and keep going when the App closes.
 
@@ -81,7 +83,7 @@ scripts/build.sh linux/amd64 # static binary in dist/
 `scripts/e2e.sh` builds both images, generates throwaway credentials, starts
 an isolated stack (the engine under test has no internet route; DHT/PeX/LSD
 off), creates v1/v2/hybrid fixtures with a second engine acting as seeder and
-tracker, and checks every acceptance item from the design (§10.2). It only
+tracker, and checks every acceptance item. It only
 removes its own compose project and work directory.
 
 ## URL layout

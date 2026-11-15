@@ -22,7 +22,8 @@ Thanks for your interest. Bug reports, fixes and small improvements are welcome.
    scripts/e2e.sh                # needs Docker; real qbittorrent-nox, isolated network
    ```
 
-4. Update the README when behaviour, configuration or tools change.
+4. Update the README in both languages (`README.md` and `README.zh-CN.md`)
+   when behaviour, configuration or tools change.
 5. Tool names, arguments and error codes are a contract with MCP clients:
    change them only with a good reason and say so in the pull request.
 
