@@ -1,11 +1,12 @@
-# OpenPlayX BitTorrent Server
+# mcp-qbittorrent
 
-A restricted HTTP API over a pinned **qbittorrent-nox 5.1.0** engine. The
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](COPYING)
+
+Server-side BitTorrent downloads for [OpenPlayX](https://github.com/openplayx/openplayx)
+as an MCP server and HTTP API (formerly *bittorrent-server*). A restricted HTTP API over a pinned **qbittorrent-nox 5.1.0** engine. The
 OpenPlayX App calls it through host-registered AI tools to add magnet /
 `.torrent` downloads, follow progress, select files, pause, resume, limit and
 remove tasks. Downloads run on the server and keep going when the App closes.
-
-Design: `design/services/bittorrent_server.md` in the OpenPlayX design repository.
 
 ## What it is (and is not)
 
@@ -47,8 +48,27 @@ deploy/              Compose, API and engine images, config templates
 scripts/             build, deploy, healthcheck, rollback, e2e
 test/fakeqb/         in-process fake engine used by API tests
 test/e2e/            Docker end-to-end suite against real qbittorrent-nox
-docs/                operations, App integration, 21177 acceptance
+docs/                operations, App integration
 ```
+
+## Quick start
+
+Requirements: Docker with Compose on the host; Go 1.26+ to build the binary.
+
+```bash
+go run ./cmd/server new-token my-client     # API token + its secrets.json entry
+scripts/build.sh linux/amd64                # dist/bittorrent-server-linux-amd64 for the image
+```
+
+Then, in `deploy/`, create `.env` from `env.example`, `config/config.json` from
+`config/config.example.json` and `config/secrets.json` from
+`config/credentials.example.json`, and deploy with `scripts/deploy.sh`.
+[docs/operations.md](docs/operations.md) walks through every step, the ports
+and the engine's security settings. Check the result with
+`curl -s http://<host>:<API_PORT>/api/readyz`.
+
+Serve the API over HTTPS (built-in TLS or a reverse proxy) for anything beyond a
+private LAN.
 
 ## Develop and test
 
@@ -127,6 +147,36 @@ account (`QBT_USERNAME` / engine password), not the API token. The proxy
 
 WebUI and API act on the same engine: changes on either side show up on the other immediately.
 
+## Using it from an MCP client
+
+```json
+{
+  "mcpServers": {
+    "qbittorrent": {
+      "type": "http",
+      "url": "https://bt.example.com/api/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+In OpenPlayX, the App's BitTorrent settings and AI tools use the HTTP API
+directly; see [docs/app-integration.md](docs/app-integration.md).
+
+## Contributing
+
+Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Report security problems privately as described in [SECURITY.md](SECURITY.md).
+
+## Disclaimer
+
+This project only manages downloads that its users add; it does not search for,
+host or distribute content. You are responsible for what you download and share
+(BitTorrent uploads while it downloads and seeds): only use it for content you
+have the right to, and follow the law that applies to you. The project is not
+affiliated with qBittorrent.
+
 ## License
 
-GNU GPL v3, see `COPYING`. Engine licensing: `deploy/LICENSES.md`.
+GNU GPL v3, see [COPYING](COPYING). Engine licensing: [deploy/LICENSES.md](deploy/LICENSES.md).
