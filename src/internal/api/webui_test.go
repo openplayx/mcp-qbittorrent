@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openplayx/bittorrent-server/internal/config"
-	"github.com/openplayx/bittorrent-server/test/fakeqb"
+	"github.com/openplayx/bittorrent-server/src/internal/config"
+	"github.com/openplayx/bittorrent-server/src/test/fakeqb"
 )
 
 type browser struct {

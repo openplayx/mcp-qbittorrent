@@ -20,7 +20,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/openplayx/bittorrent-server/internal/torrents"
+	"github.com/openplayx/bittorrent-server/src/internal/torrents"
 )
 
 var mcpVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26"}

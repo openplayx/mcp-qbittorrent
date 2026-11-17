@@ -23,8 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/config"
-	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
+	"github.com/openplayx/bittorrent-server/src/internal/config"
+	"github.com/openplayx/bittorrent-server/src/internal/qbittorrent"
 )
 
 // Engine is the subset of the qBittorrent adapter the service uses.

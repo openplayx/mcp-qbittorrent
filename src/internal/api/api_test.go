@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	apispec "github.com/openplayx/bittorrent-server/api"
-	"github.com/openplayx/bittorrent-server/internal/api"
-	"github.com/openplayx/bittorrent-server/internal/bencode"
-	"github.com/openplayx/bittorrent-server/internal/config"
-	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
-	"github.com/openplayx/bittorrent-server/internal/torrents"
-	"github.com/openplayx/bittorrent-server/test/fakeqb"
+	apispec "github.com/openplayx/bittorrent-server/src/api"
+	"github.com/openplayx/bittorrent-server/src/internal/api"
+	"github.com/openplayx/bittorrent-server/src/internal/bencode"
+	"github.com/openplayx/bittorrent-server/src/internal/config"
+	"github.com/openplayx/bittorrent-server/src/internal/qbittorrent"
+	"github.com/openplayx/bittorrent-server/src/internal/torrents"
+	"github.com/openplayx/bittorrent-server/src/test/fakeqb"
 )
 
 const token = "test-token"

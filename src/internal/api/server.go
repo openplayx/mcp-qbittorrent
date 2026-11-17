@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	apispec "github.com/openplayx/bittorrent-server/api"
-	"github.com/openplayx/bittorrent-server/internal/config"
-	"github.com/openplayx/bittorrent-server/internal/torrents"
-	"github.com/openplayx/bittorrent-server/internal/webui"
+	apispec "github.com/openplayx/bittorrent-server/src/api"
+	"github.com/openplayx/bittorrent-server/src/internal/config"
+	"github.com/openplayx/bittorrent-server/src/internal/torrents"
+	"github.com/openplayx/bittorrent-server/src/internal/webui"
 )
 
 type Server struct {

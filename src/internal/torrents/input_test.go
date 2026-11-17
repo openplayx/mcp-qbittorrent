@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openplayx/bittorrent-server/internal/bencode"
+	"github.com/openplayx/bittorrent-server/src/internal/bencode"
 )
 
 var strict = Policy{TrackerSchemes: []string{"http", "https", "udp"}, Resolver: func(_ context.Context, host string) ([]netip.Addr, error) {

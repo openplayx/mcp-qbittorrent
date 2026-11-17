@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/bencode"
+	"github.com/openplayx/bittorrent-server/src/internal/bencode"
 )
 
 // Identity is the BitTorrent identity of a payload. A hybrid torrent has

@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/bencode"
+	"github.com/openplayx/bittorrent-server/src/internal/bencode"
 )
 
 type File struct {

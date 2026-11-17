@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generate api/openapi.json (OpenAPI 3.1). Run after changing the HTTP API;
-internal/api tests check that every served route is documented."""
+"""Generate src/api/openapi.json (OpenAPI 3.1). Run after changing the HTTP API;
+src/internal/api tests check that every served route is documented."""
 import json
 import os
 
@@ -199,6 +199,6 @@ doc = {
     },
 }
 
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "api", "openapi.json")
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "api", "openapi.json")
 with open(out, "w") as f:
     f.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")

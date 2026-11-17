@@ -27,7 +27,7 @@ Thanks for your interest. Bug reports, fixes and small improvements are welcome.
 5. Tool names, arguments and error codes are a contract with MCP clients:
    change them only with a good reason and say so in the pull request.
 
-`api/openapi.json` is generated: run `scripts/gen-openapi.py` after changing the API.
+`src/api/openapi.json` is generated: run `scripts/gen-openapi.py` after changing the API.
 
 By contributing you agree that your contribution is licensed under this
 repository's license.

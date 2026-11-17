@@ -17,18 +17,18 @@
 ## 目录结构
 
 ```text
-cmd/server/          API 入口；另有 `new-token` 和 `engine-password-hash` 子命令
-internal/api/        鉴权、限流、请求/响应、错误
-internal/torrents/   无状态服务：输入、签名计划、实时视图、控制、标签自动化
-internal/qbittorrent qBittorrent 5.x WebUI API 适配器（锁定版本）
-internal/files/      授权的文件引用，防符号链接的读取/删除
-internal/webui/      原生 WebUI 的受保护反向代理
-api/                 OpenAPI 3.1（由 scripts/gen-openapi.py 生成）和 /api/docs 页面
-deploy/              Compose、API 和引擎镜像、配置模板
-scripts/             构建、部署、健康检查、回滚、端到端测试
-test/fakeqb/         API 测试使用的进程内模拟引擎
-test/e2e/            基于真实 qbittorrent-nox 的 Docker 端到端测试
-docs/                运维、App 集成
+src/cmd/server/           API 入口；另有 `new-token` 和 `engine-password-hash` 子命令
+src/internal/api/         鉴权、限流、请求/响应、错误
+src/internal/torrents/    无状态服务：输入、签名计划、实时视图、控制、标签自动化
+src/internal/qbittorrent  qBittorrent 5.x WebUI API 适配器（锁定版本）
+src/internal/files/       授权的文件引用，防符号链接的读取/删除
+src/internal/webui/       原生 WebUI 的受保护反向代理
+src/api/                  OpenAPI 3.1（由 scripts/gen-openapi.py 生成）和 /api/docs 页面
+deploy/                   Compose、API 和引擎镜像、配置模板
+scripts/                  构建、部署、健康检查、回滚、端到端测试
+src/test/fakeqb/          API 测试使用的进程内模拟引擎
+src/test/e2e/             基于真实 qbittorrent-nox 的 Docker 端到端测试
+docs/                     运维、App 集成
 ```
 
 ## 快速开始
@@ -36,7 +36,7 @@ docs/                运维、App 集成
 依赖：宿主机上的 Docker 和 Compose；构建二进制需要 Go 1.26+。
 
 ```bash
-go run ./cmd/server new-token my-client     # 生成 API token 及其 secrets.json 条目
+go run ./src/cmd/server new-token my-client     # 生成 API token 及其 secrets.json 条目
 scripts/build.sh linux/amd64                # 镜像用的 dist/bittorrent-server-linux-amd64
 ```
 
@@ -81,7 +81,7 @@ scripts/build.sh linux/amd64 # 静态二进制输出到 dist/
 | `POST /api/v1/torrents/{id}/remove-plan` / `remove` | 先预览，再执行 |
 | `GET\|HEAD /api/v1/torrents/{id}/files/{file_id}/content` | 已完成的文件，支持 Range |
 
-完整定义：`api/openapi.json`，在 `/api/docs` 渲染。
+完整定义：`src/api/openapi.json`，在 `/api/docs` 渲染。
 
 ## MCP
 
@@ -91,7 +91,7 @@ scripts/build.sh linux/amd64 # 静态二进制输出到 dist/
 
 ## WebUI
 
-用户在浏览器中打开服务器根地址，用引擎的 WebUI 账号（`QBT_USERNAME` / 引擎密码）登录，而不是 API token。代理（`internal/webui`）会：
+用户在浏览器中打开服务器根地址，用引擎的 WebUI 账号（`QBT_USERNAME` / 引擎密码）登录，而不是 API token。代理（`src/internal/webui`）会：
 
 - 按浏览器访问的主机检查 Origin/Referer，再改写 Host/Origin/Referer，使引擎自身的 Host 和 CSRF 检查保持开启；
 - 拒绝全局设置（`app/setPreferences`）、关闭程序、搜索插件、RSS 和种子制作——这些按钮在界面上会显示错误；

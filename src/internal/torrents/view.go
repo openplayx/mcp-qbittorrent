@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
+	"github.com/openplayx/bittorrent-server/src/internal/qbittorrent"
 )
 
 // Public download states.

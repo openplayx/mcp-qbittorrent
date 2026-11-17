@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/torrents"
+	"github.com/openplayx/bittorrent-server/src/internal/torrents"
 )
 
 var (

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
+	"github.com/openplayx/bittorrent-server/src/internal/qbittorrent"
 )
 
 // ---- uploaded .torrent inputs ----

@@ -3,9 +3,9 @@
 /deploy/config/config.json
 /deploy/config/secrets.json
 /deploy/state/
-/test/e2e/work/
+/src/test/e2e/work/
 *.db
 *.db-wal
 *.db-shm
-/test/e2e/reports/
-test/e2e/e2e.test
+/src/test/e2e/reports/
+src/test/e2e/e2e.test

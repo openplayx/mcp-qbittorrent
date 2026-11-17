@@ -24,11 +24,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/api"
-	"github.com/openplayx/bittorrent-server/internal/config"
-	"github.com/openplayx/bittorrent-server/internal/files"
-	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
-	"github.com/openplayx/bittorrent-server/internal/torrents"
+	"github.com/openplayx/bittorrent-server/src/internal/api"
+	"github.com/openplayx/bittorrent-server/src/internal/config"
+	"github.com/openplayx/bittorrent-server/src/internal/files"
+	"github.com/openplayx/bittorrent-server/src/internal/qbittorrent"
+	"github.com/openplayx/bittorrent-server/src/internal/torrents"
 )
 
 var version = "dev"

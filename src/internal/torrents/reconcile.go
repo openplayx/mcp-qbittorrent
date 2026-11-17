@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
+	"github.com/openplayx/bittorrent-server/src/internal/qbittorrent"
 )
 
 // Run executes the engine-side automation periodically until ctx ends:

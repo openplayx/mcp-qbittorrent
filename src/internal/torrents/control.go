@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openplayx/bittorrent-server/internal/files"
-	"github.com/openplayx/bittorrent-server/internal/qbittorrent"
+	"github.com/openplayx/bittorrent-server/src/internal/files"
+	"github.com/openplayx/bittorrent-server/src/internal/qbittorrent"
 )
 
 // ---- reads (always live from the engine) ----
