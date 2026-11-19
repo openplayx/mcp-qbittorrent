@@ -73,6 +73,16 @@ func TestMCPHandshakeAndCatalog(t *testing.T) {
 			t.Errorf("missing tool %s", n)
 		}
 	}
+	for _, n := range []string{"list_destinations", "create_plan", "list_downloads", "get_download", "create_remove_plan"} {
+		if names[n]["annotations"].(map[string]any)["readOnlyHint"] != true {
+			t.Errorf("%s must be marked read-only", n)
+		}
+	}
+	for _, n := range []string{"start_download", "pause", "resume", "remove"} {
+		if names[n]["annotations"].(map[string]any)["readOnlyHint"] != false {
+			t.Errorf("%s must remain a write requiring confirmation", n)
+		}
+	}
 	if names["remove"]["annotations"].(map[string]any)["destructiveHint"] != true {
 		t.Error("remove must be marked destructive")
 	}

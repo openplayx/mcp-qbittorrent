@@ -100,9 +100,9 @@ func (a taskArgs) id() (string, error) {
 	return a.TaskID, nil
 }
 
-func taskTool(name, title, desc string, idempotent bool, run func(s *Server, r *http.Request, id string) (any, error)) mcpTool {
+func taskTool(name, title, desc string, readOnly, idempotent bool, run func(s *Server, r *http.Request, id string) (any, error)) mcpTool {
 	return mcpTool{
-		Name: name, Title: title, Description: desc, Idempotent: idempotent,
+		Name: name, Title: title, Description: desc, ReadOnly: readOnly, Idempotent: idempotent,
 		Schema: object(map[string]any{"task_id": taskIDProp}, "task_id"),
 		Run: func(s *Server, r *http.Request, raw json.RawMessage) (any, error) {
 			var a taskArgs
@@ -194,13 +194,13 @@ var mcpTools = []mcpTool{
 			return map[string]any{"items": items}, err
 		},
 	},
-	taskTool("get_download", "Download details", "One task's state, progress and rates.", true,
+	taskTool("get_download", "Download details", "One task's state, progress and rates.", true, true,
 		func(s *Server, r *http.Request, id string) (any, error) { return s.svc.GetTask(r.Context(), id) }),
-	taskTool("pause", "Pause download", "Pauses a task. Keeps all data.", true,
+	taskTool("pause", "Pause download", "Pauses a task. Keeps all data.", false, true,
 		func(s *Server, r *http.Request, id string) (any, error) {
 			return s.svc.Pause(r.Context(), caller(r), requestID(r), id)
 		}),
-	taskTool("resume", "Resume download", "Resumes a paused task.", true,
+	taskTool("resume", "Resume download", "Resumes a paused task.", false, true,
 		func(s *Server, r *http.Request, id string) (any, error) {
 			return s.svc.Resume(r.Context(), caller(r), requestID(r), id)
 		}),
